@@ -1,0 +1,22 @@
+[Unit]
+Description=Jarvis AI Multi-Agent System
+After=network.target
+
+[Service]
+Type=simple
+User=jarvis
+WorkingDirectory=/opt/jarvis
+ExecStart=/opt/jarvis/venv/bin/python -m jarvis.main
+Restart=always
+RestartSec=10
+Environment=PATH=/opt/jarvis/venv/bin
+EnvironmentFile=/opt/jarvis/.env
+
+# Security settings
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/jarvis/logs /opt/jarvis/data
+
+[Install]
+WantedBy=multi-user.target

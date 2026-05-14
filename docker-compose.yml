@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  jarvis:
+    build: .
+    container_name: jarvis-ai
+    env_file:
+      - .env
+    volumes:
+      # Mount for logs or data persistence
+      - ./logs:/app/logs
+      - ./data:/app/data
+    restart: unless-stopped
+    # For interactive mode (comment out for background)
+    # stdin_open: true
+    # tty: true
+    # For web interface later
+    # ports:
+    #   - "8000:8000"

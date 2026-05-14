@@ -1,0 +1,9 @@
+crewai
+openai
+python-dotenv
+asyncio
+requests
+moviepy
+pytube
+tweepy
+instabot
