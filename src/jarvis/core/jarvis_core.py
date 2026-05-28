@@ -19,12 +19,15 @@ from typing import List, Optional
 from jarvis.agents import ALL_AGENTS, BaseAgent, TaskContext
 from jarvis.core.router import JarvisRouter
 from jarvis.memory import MemoryStore
+from jarvis.tools import builtin_tools
 
 
 class JarvisCore:
     def __init__(self, session_id: Optional[str] = None) -> None:
         self.session_id = session_id or f"cli-{uuid.uuid4().hex[:8]}"
-        self.memory = MemoryStore(os.getenv("DATA_DIR", "./data") + "/jarvis.db")
+        data_dir = os.getenv("DATA_DIR", "./data")
+        self.memory = MemoryStore(data_dir + "/jarvis.db")
+        self.tools = builtin_tools(os.getenv("AGENT_WORKSPACE", data_dir + "/agent_workspace"))
         self.agents: List[BaseAgent] = [cls() for cls in ALL_AGENTS]
         self.router = JarvisRouter(self.agents)
         self.autonomous_mode = os.getenv("JARVIS_MODE", "interactive") == "autonomous"
@@ -62,6 +65,7 @@ class JarvisCore:
             user_input=user_input,
             history=history,
             memory=self.memory,
+            tools=self.tools,
         )
         try:
             reply = await agent.handle(ctx)
@@ -90,6 +94,10 @@ class JarvisCore:
             return "\n".join(f"- {k}: {v}" for k, v in facts.items())
         if head == "session":
             return f"Session: {self.session_id}"
+        if head == "tools":
+            return self._tools_text()
+        if head == "tool":
+            return await self._cmd_tool(rest)
         return f"Unknown command: /{head}. Try /help."
 
     def _cmd_remember(self, rest: str) -> str:
@@ -104,6 +112,8 @@ class JarvisCore:
             "Jarvis commands:\n"
             "  /help                   Show this help\n"
             "  /agents                 List specialist agents\n"
+            "  /tools                  List available tools\n"
+            "  /tool <name> <json>     Run a tool directly (debug)\n"
             "  /status                 Provider + agent status\n"
             "  /remember key = value   Store a fact\n"
             "  /facts                  Show all stored facts\n"
@@ -111,6 +121,28 @@ class JarvisCore:
             "  @<agent> <task>         Force route to a specific agent\n"
             "  <anything else>         Auto-routed by Jarvis"
         )
+
+    def _tools_text(self) -> str:
+        out = ["Available tools:"]
+        for t in self.tools.all():
+            out.append(f"  \u2022 {t.name:12s} {t.description}")
+        return "\n".join(out)
+
+    async def _cmd_tool(self, rest: str) -> str:
+        import json
+        if not rest:
+            return "Usage: /tool <name> <json-args>"
+        parts = rest.split(maxsplit=1)
+        name = parts[0]
+        args_text = parts[1] if len(parts) > 1 else "{}"
+        try:
+            args = json.loads(args_text)
+            if not isinstance(args, dict):
+                return "args must be a JSON object"
+        except json.JSONDecodeError as e:
+            return f"Invalid JSON: {e}"
+        result = await self.tools.call(name, **args)
+        return result.to_text()
 
     def _agents_text(self) -> str:
         out = ["Specialist agents:"]
