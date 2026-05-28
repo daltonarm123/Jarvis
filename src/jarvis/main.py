@@ -2,18 +2,19 @@
 """Main entry point for Jarvis."""
 
 import asyncio
-import sys
+
+from dotenv import load_dotenv
+
 from jarvis.core.jarvis_core import JarvisCore
 
 
-def main():
+def main() -> None:
     """Main function to run Jarvis."""
+    # Load .env from the current working directory if present.
+    load_dotenv()
+
     print("Starting Jarvis...")
-
-    # Initialize Jarvis core
     jarvis = JarvisCore()
-
-    # For now, run a simple loop
     asyncio.run(jarvis.run())
 
 
