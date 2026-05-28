@@ -30,6 +30,8 @@ class DevAgent(BaseAgent):
                 self.model = "gpt-4o"
         except KeyError:
             pass
+        # Dev agent uses tools by default (will pick up workspace from ctx if not set).
+        self.tools = None  # use ctx.tools (the global builtin set)
 
     @classmethod
     def capabilities(cls) -> List[Capability]:

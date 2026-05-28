@@ -39,6 +39,7 @@ You'll get a `Jarvis>` prompt. Try:
 ```
 Jarvis> /help
 Jarvis> /agents
+Jarvis> /tools
 Jarvis> /status
 Jarvis> can you refactor this lua script for me
    → routed to: server
@@ -46,6 +47,31 @@ Jarvis> @dev write a python script to rename files
    → forced to: dev
 Jarvis> /remember favorite_editor = neovim
 ```
+
+## Tools
+
+Agents have access to a sandboxed toolset:
+
+| Tool | What it does |
+|---|---|
+| `read_file` | Read a UTF-8 file from the workspace |
+| `write_file` | Create/overwrite a file in the workspace |
+| `list_dir` | List files (optionally recursive) |
+| `shell` | Run a shell command (allowlist + timeout) |
+| `http_get` | Raw HTTP GET |
+| `web_fetch` | Fetch a webpage and return readable text |
+
+File ops are scoped to `AGENT_WORKSPACE` (default `./data/agent_workspace`). Shell goes through an allowlist; `rm`, `sudo`, `dd`, etc. are hard-denied. Path traversal blocked. Test a tool directly with `/tool <name> <json-args>`.
+
+Agents call tools by emitting fenced JSON blocks in their replies:
+
+```
+```tool
+{"tool": "web_fetch", "args": {"url": "https://news.ycombinator.com"}}
+```
+```
+
+Jarvis executes them in order, feeds results back, and loops until the agent produces a plain-text final answer.
 
 ## Architecture
 
