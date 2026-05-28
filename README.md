@@ -73,6 +73,43 @@ Agents call tools by emitting fenced JSON blocks in their replies:
 
 Jarvis executes them in order, feeds results back, and loops until the agent produces a plain-text final answer.
 
+## Scheduler
+
+Jarvis runs background jobs persistently — they survive restarts and can catch up missed runs. Three job kinds:
+
+- `agent_task` — feed input through Jarvis as if you typed it (optionally pinned to a specific agent)
+- `tool_call` — call a tool directly with kwargs
+- `system_event` — internal hook (currently `daily_briefing`)
+
+Schedule formats:
+
+```
+"cron:0 9 * * *"          # standard 5-field cron
+"@daily 09:00"            # shorthand
+every:30m                 # interval (s/m/h/d)
+at:2026-06-01T08:00:00    # one-shot
+```
+
+Slash commands:
+
+```
+/jobs                                              list scheduled jobs
+/schedule <id> <when> <kind> <payload-json>        add a job
+/unschedule <id>                                   remove a job
+/runjob <id>                                       fire a job now (off-schedule)
+/runs <id>                                         recent run history
+```
+
+Examples:
+
+```
+/schedule morning "@daily 09:00" system_event {"event":"daily_briefing"}
+/schedule trends "cron:0 */6 * * *" agent_task {"agent":"personal","input":"summarize trending tech topics"}
+/schedule heartbeat every:30m tool_call {"tool":"shell","args":{"command":"git status"}}
+```
+
+Failing jobs auto-disable after `max_failures` (default 5). All run history is in SQLite at `$DATA_DIR/scheduler.db`.
+
 ## Architecture
 
 ```
