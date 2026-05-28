@@ -1,56 +1,78 @@
-"""Base class for all Jarvis agents."""
+"""New BaseAgent + capability declaration.
+
+An agent is anything that:
+  - declares what it can do (`capabilities`)
+  - picks an LLM provider + model for itself
+  - exposes `handle(task, context)` to do work
+"""
+
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional
-import os
+from dataclasses import dataclass, field
+from typing import List, Optional, TYPE_CHECKING
+
+from jarvis.llm import LLMMessage, get_provider
+
+if TYPE_CHECKING:
+    from jarvis.memory import MemoryStore
+
+
+@dataclass
+class Capability:
+    """One thing an agent can do. Used by the router to pick an agent."""
+    name: str
+    description: str
+    keywords: List[str] = field(default_factory=list)
+
+
+@dataclass
+class TaskContext:
+    """Carried alongside every task. Contains conversation history,
+    session id, the shared memory store, and anything else routers/
+    agents need to do their job."""
+    session_id: str
+    user_input: str
+    history: list = field(default_factory=list)
+    memory: Optional["MemoryStore"] = None
 
 
 class BaseAgent(ABC):
-    """Abstract base class for agents."""
+    """All Jarvis specialists subclass this."""
 
-    def __init__(self, name: str, jarvis_core=None, ai_model: str = "gpt-4"):
-        self.name = name
-        self.status = "idle"
-        self.jarvis = jarvis_core
-        self.ai_model = ai_model
-        self._client = None  # lazy-initialized so the system can boot without an API key
+    name: str = "unnamed"
+    description: str = ""
+    provider: str = "openai"
+    model: str = "gpt-4o-mini"
+    system_prompt: str = "You are a helpful assistant."
 
-    def _get_client(self):
-        """Lazily build the OpenAI client. Raises if no key is configured."""
-        if self._client is None:
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                raise RuntimeError(
-                    "OPENAI_API_KEY is not set. Add it to your .env (see .env.example)."
-                )
-            # Imported here so projects without `openai` installed can still
-            # import this module for type checks / non-AI commands.
-            from openai import AsyncOpenAI
-            self._client = AsyncOpenAI(api_key=api_key)
-        return self._client
+    @classmethod
+    def capabilities(cls) -> List[Capability]:
+        return []
+
+    async def handle(self, ctx: TaskContext) -> str:
+        """Default: send the user input to the configured LLM with the
+        agent's system prompt and a windowed history."""
+        provider = get_provider(self.provider)
+        if not provider.is_configured():
+            return (
+                f"[{self.name}] {self.provider} provider not configured. "
+                f"Set its API key in .env."
+            )
+
+        messages: List[LLMMessage] = []
+        for m in ctx.history[-10:]:
+            if m.get("role") in ("user", "assistant"):
+                messages.append(LLMMessage(role=m["role"], content=m["content"]))
+        messages.append(LLMMessage(role="user", content=ctx.user_input))
+
+        resp = await provider.complete(
+            messages,
+            model=self.model,
+            system=self.system_prompt,
+            max_tokens=1024,
+        )
+        return resp.content
 
     @abstractmethod
-    async def execute_command(self, command: str) -> str:
-        """Execute a command and return the result."""
-        ...
-
-    async def start(self):
-        """Start the agent."""
-        self.status = "running"
-
-    async def stop(self):
-        """Stop the agent."""
-        self.status = "stopped"
-
-    async def call_ai(self, prompt: str, max_tokens: int = 500) -> str:
-        """Call the AI model with a prompt."""
-        try:
-            client = self._get_client()
-            response = await client.chat.completions.create(
-                model=self.ai_model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
-            )
-            return (response.choices[0].message.content or "").strip()
-        except Exception as e:
-            return f"AI Error: {e}"
+    def __init__(self) -> None: ...

@@ -4,13 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jarvis"
-version = "0.1.0"
-description = "Multi-agent system for content creation and automation"
-authors = [
-    {name = "Dalton Armstrong"},
-]
+version = "0.2.0"
+description = "Multi-agent personal AI orchestrator"
+authors = [{name = "Dalton Armstrong"}]
 dependencies = [
     "openai>=1.40.0",
+    "anthropic>=0.34.0",
     "python-dotenv>=1.0.0",
     "requests>=2.32.0",
     "schedule>=1.2.0",
@@ -23,14 +22,10 @@ social = [
     "tweepy>=4.14.0",
     "discord.py>=2.4.0",
     "slack-sdk>=3.27.0",
-    "google-api-python-client>=2.140.0",
 ]
-media = [
-    "moviepy>=1.0.3",
-]
-analytics = [
-    "pandas>=2.2.0",
-    "matplotlib>=3.9.0",
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
 ]
 
 [project.scripts]
@@ -38,3 +33,7 @@ jarvis = "jarvis.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

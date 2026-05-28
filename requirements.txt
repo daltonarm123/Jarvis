@@ -1,21 +1,16 @@
 # Core
 openai>=1.40.0
+anthropic>=0.34.0
 python-dotenv>=1.0.0
 requests>=2.32.0
 
 # Scheduling
 schedule>=1.2.0
 
-# Optional integrations — uncomment only what you actually use.
-# Note: instabot and tiktok-api are unmaintained and likely broken on
-# modern Python. Pick a maintained alternative when you wire those up.
-
-# tweepy>=4.14.0          # Twitter
-# discord.py>=2.4.0       # Discord
-# slack-sdk>=3.27.0       # Slack
+# Optional integrations — uncomment when you wire them up.
+# tweepy>=4.14.0
+# discord.py>=2.4.0
+# slack-sdk>=3.27.0
 # google-api-python-client>=2.140.0
-# oauth2client>=4.1.3
-# moviepy>=1.0.3          # Video editing
-# pytube>=15.0.0          # YouTube download (often breaks; consider yt-dlp)
+# moviepy>=1.0.3
 # pandas>=2.2.0
-# matplotlib>=3.9.0

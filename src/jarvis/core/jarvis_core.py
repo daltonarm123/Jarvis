@@ -1,148 +1,162 @@
-"""Core Jarvis class that manages agents and user interactions."""
+"""Jarvis orchestrator.
 
-import asyncio
+Owns:
+  - the agent registry
+  - the router
+  - the memory store
+  - the conversation loop
+
+Front-ends (CLI, Discord, voice) call `JarvisCore.handle(user_input)` —
+that's the single integration point.
+"""
+
+from __future__ import annotations
+
 import os
-from typing import List
-from jarvis.agents.base_agent import BaseAgent
-from jarvis.communication.user_interface import UserInterface
-from jarvis.config import AGENT_CONFIG
-from jarvis.utils.daily_reporter import DailyReporter
-from jarvis.utils.finance_tracker import FinanceTracker
+import uuid
+from typing import List, Optional
+
+from jarvis.agents import ALL_AGENTS, BaseAgent, TaskContext
+from jarvis.core.router import JarvisRouter
+from jarvis.memory import MemoryStore
 
 
 class JarvisCore:
-    """Central controller for the Jarvis system."""
-
-    def __init__(self):
-        self.agents: List[BaseAgent] = []
-        self.user_interface = UserInterface()
-        self.reporter = DailyReporter()
-        self.finance_tracker = FinanceTracker()
+    def __init__(self, session_id: Optional[str] = None) -> None:
+        self.session_id = session_id or f"cli-{uuid.uuid4().hex[:8]}"
+        self.memory = MemoryStore(os.getenv("DATA_DIR", "./data") + "/jarvis.db")
+        self.agents: List[BaseAgent] = [cls() for cls in ALL_AGENTS]
+        self.router = JarvisRouter(self.agents)
         self.autonomous_mode = os.getenv("JARVIS_MODE", "interactive") == "autonomous"
-        self._initialize_agents()
 
-    def _initialize_agents(self):
-        """Initialize the default set of agents."""
-        # Imported here to avoid circular imports at module load time.
-        from jarvis.agents.content_creator import ContentCreatorAgent
-        from jarvis.agents.video_editor import VideoEditorAgent
-        from jarvis.agents.stream_clipper import StreamClipperAgent
-        from jarvis.agents.social_poster import SocialPosterAgent
-        from jarvis.agents.ecommerce_agent import EcommerceAgent
-        from jarvis.agents.marketing_agent import MarketingAgent
+    # ---------- main entry point ----------
 
-        self.agents = [
-            ContentCreatorAgent("Content Creator 1", self, AGENT_CONFIG["Content Creator 1"]["ai_model"]),
-            VideoEditorAgent("Video Editor 1", self, AGENT_CONFIG["Video Editor 1"]["ai_model"]),
-            StreamClipperAgent("Stream Clipper 1", self, AGENT_CONFIG["Stream Clipper 1"]["ai_model"]),
-            SocialPosterAgent("Social Poster 1", self, AGENT_CONFIG["Social Poster 1"]["ai_model"]),
-            EcommerceAgent("E-commerce Agent 1", self, AGENT_CONFIG["E-commerce Agent 1"]["ai_model"]),
-            MarketingAgent("Marketing Agent 1", self, AGENT_CONFIG["Marketing Agent 1"]["ai_model"]),
-        ]
+    async def handle(self, user_input: str) -> str:
+        text = user_input.strip()
+        if not text:
+            return ""
 
-    async def run(self):
-        """Main run loop for Jarvis."""
-        print("Jarvis is running. Type 'help' for commands.")
+        # Slash-style commands bypass the router.
+        if text.startswith("/"):
+            return await self._handle_command(text[1:])
 
+        # Direct address: "@dev refactor this" → forces routing.
+        forced = self._extract_at_mention(text)
+        if forced:
+            agent_name, payload = forced
+            agent = next((a for a in self.agents if a.name == agent_name), None)
+            if agent is None:
+                return f"No agent named '{agent_name}'. Try /agents."
+            return await self._dispatch(agent, payload)
+
+        agent = await self.router.route(text)
+        return await self._dispatch(agent, text)
+
+    # ---------- internals ----------
+
+    async def _dispatch(self, agent: BaseAgent, user_input: str) -> str:
+        self.memory.add_message(self.session_id, "user", user_input, agent=agent.name)
+        history = self.memory.recent_messages(self.session_id, limit=20)
+        ctx = TaskContext(
+            session_id=self.session_id,
+            user_input=user_input,
+            history=history,
+            memory=self.memory,
+        )
+        try:
+            reply = await agent.handle(ctx)
+        except Exception as e:  # don't crash the loop on agent errors
+            reply = f"[{agent.name}] error: {e}"
+        self.memory.add_message(self.session_id, "assistant", reply, agent=agent.name)
+        return f"[{agent.name}] {reply}"
+
+    async def _handle_command(self, cmd: str) -> str:
+        parts = cmd.split(maxsplit=1)
+        head = parts[0].lower()
+        rest = parts[1] if len(parts) > 1 else ""
+
+        if head in ("help", "h", "?"):
+            return self._help_text()
+        if head == "agents":
+            return self._agents_text()
+        if head == "status":
+            return self._status_text()
+        if head == "remember":
+            return self._cmd_remember(rest)
+        if head == "facts":
+            facts = self.memory.all_facts()
+            if not facts:
+                return "No facts stored."
+            return "\n".join(f"- {k}: {v}" for k, v in facts.items())
+        if head == "session":
+            return f"Session: {self.session_id}"
+        return f"Unknown command: /{head}. Try /help."
+
+    def _cmd_remember(self, rest: str) -> str:
+        if "=" not in rest:
+            return "Usage: /remember key = value"
+        key, value = (s.strip() for s in rest.split("=", 1))
+        self.memory.set_fact(key, value)
+        return f"Remembered: {key} = {value}"
+
+    def _help_text(self) -> str:
+        return (
+            "Jarvis commands:\n"
+            "  /help                   Show this help\n"
+            "  /agents                 List specialist agents\n"
+            "  /status                 Provider + agent status\n"
+            "  /remember key = value   Store a fact\n"
+            "  /facts                  Show all stored facts\n"
+            "  /session                Show current session id\n"
+            "  @<agent> <task>         Force route to a specific agent\n"
+            "  <anything else>         Auto-routed by Jarvis"
+        )
+
+    def _agents_text(self) -> str:
+        out = ["Specialist agents:"]
+        for a in self.agents:
+            out.append(f"  • {a.name:10s} ({a.provider}/{a.model})")
+            out.append(f"    {a.description}")
+        return "\n".join(out)
+
+    def _status_text(self) -> str:
+        from jarvis.llm import available_providers
+        configured = available_providers(only_configured=True)
+        all_p = available_providers()
+        return (
+            f"Session: {self.session_id}\n"
+            f"Mode: {'autonomous' if self.autonomous_mode else 'interactive'}\n"
+            f"Providers configured: {configured or 'NONE'}\n"
+            f"Providers available:  {all_p}\n"
+            f"Agents loaded: {len(self.agents)}"
+        )
+
+    @staticmethod
+    def _extract_at_mention(text: str):
+        if not text.startswith("@"):
+            return None
+        head, _, payload = text[1:].partition(" ")
+        if not head or not payload:
+            return None
+        return head.lower(), payload.strip()
+
+    # ---------- legacy CLI loop ----------
+
+    async def run(self) -> None:
+        from jarvis.communication.user_interface import UserInterface
+        ui = UserInterface()
+        print("Jarvis online. Type /help for commands. Ctrl-C or 'quit' to exit.\n")
         while True:
-            user_input = await self.user_interface.get_input()
-            if user_input.lower() in ['quit', 'exit']:
+            try:
+                user_input = await ui.get_input()
+            except (EOFError, KeyboardInterrupt):
+                print()
                 break
-            elif user_input.lower() == 'help':
-                self._show_help()
-            elif user_input.lower().startswith('agent '):
-                await self._handle_agent_command(user_input)
-            else:
-                response = await self._process_command(user_input)
-                await self.user_interface.send_output(response)
-
-        print("Shutting down Jarvis...")
-
-    def _show_help(self):
-        """Display help information."""
-        help_text = """
-Available commands:
-- help: Show this help
-- briefing: Get daily report and plan
-- agent <name> <command>: Send command to specific agent
-- status: Show system status
-- quit/exit: Shutdown Jarvis
-        """
-        print(help_text)
-
-    async def _handle_agent_command(self, command: str):
-        """Handle commands directed to agents."""
-        parts = command.split(' ', 2)
-        if len(parts) < 3:
-            print("Usage: agent <name> <command>")
-            return
-
-        agent_name = parts[1]
-        agent_command = parts[2]
-
-        agent = next((a for a in self.agents if a.name == agent_name), None)
-        if agent:
-            result = await agent.execute_command(agent_command)
-            print(f"Agent {agent_name}: {result}")
-        else:
-            print(f"Agent {agent_name} not found.")
-
-    async def _process_command(self, command: str) -> str:
-        """Process general commands."""
-        if command.lower() == 'status':
-            return self._get_status()
-        elif command.lower() == 'briefing':
-            return await self.get_daily_briefing()
-        else:
-            return f"Unknown command: {command}"
-
-    async def report_issue(self, agent_name: str, issue: str):
-        """Receive issue reports from agents."""
-        print(f"[JARVIS] Received issue from {agent_name}: {issue}")
-        solution = await self._analyze_issue(issue)
-        print(f"[JARVIS] Suggested solution: {solution}")
-        return solution
-
-    async def _analyze_issue(self, issue: str) -> str:
-        """Analyze an issue and suggest a solution."""
-        # Simple rule-based analysis for now.
-        if "conversion" in issue.lower():
-            return "Try A/B testing different landing pages or offers."
-        elif "ad spend" in issue.lower():
-            return "Optimize targeting and ad creative for better ROI."
-        elif "low engagement" in issue.lower():
-            return "Improve content quality and posting schedule."
-        else:
-            return "Investigate further and gather more data."
-
-    async def get_daily_briefing(self) -> str:
-        """Get daily briefing with yesterday's report and today's plan."""
-        yesterday_report = self.reporter.get_yesterday_report()
-        today_plan = self.reporter.get_today_plan()
-
-        briefing = "🌅 Good morning! Here's your daily briefing:\n\n"
-
-        briefing += "📊 Yesterday's Summary:\n"
-        briefing += f"{yesterday_report['summary']}\n\n"
-
-        briefing += "💰 Financial Overview:\n"
-        finance = yesterday_report['finance']
-        briefing += f"• Daily Net: ${finance['net_daily']:.2f}\n"
-        briefing += f"• Transactions: {len(finance['transactions'])}\n\n"
-
-        briefing += "🎯 Today's Plan:\n"
-        for agent, tasks in today_plan['planned_activities'].items():
-            briefing += f"• {agent}: {', '.join(tasks)}\n"
-
-        briefing += "\n🎯 Goals:\n"
-        for goal in today_plan['goals']:
-            briefing += f"• {goal}\n"
-
-        return briefing
-
-    def _get_status(self) -> str:
-        """Get system status."""
-        status = f"Jarvis Status:\nActive agents: {len(self.agents)}\n"
-        for agent in self.agents:
-            status += f"- {agent.name}: {agent.status}\n"
-        return status
+            if user_input.strip().lower() in ("quit", "exit"):
+                break
+            if not user_input.strip():
+                continue
+            reply = await self.handle(user_input)
+            await ui.send_output(reply)
+        print("Shutting down Jarvis.")
+        self.memory.close()
