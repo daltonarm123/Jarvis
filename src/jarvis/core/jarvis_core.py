@@ -23,19 +23,7 @@ class JarvisCore:
 
     def _initialize_agents(self):
         """Initialize the default set of agents."""
-        # For now, create placeholder agents
-        # In the future, load from config or dynamically
-        from jarvis.agents.content_creator import ContentCreatorAgent
-        from jarvis.agents.video_editor import VideoEditorAgent
-        from jarvis.agents.stream_clipper import StreamClipperAgent
-        from jarvis.agents.social_poster import SocialPosterAgent
-        from jarvis.agents.ecommerce_agent import EcommerceAgent
-        from jarvis.agents.marketing_agent import MarketingAgent
-
-    def _initialize_agents(self):
-        """Initialize the default set of agents."""
-        # For now, create placeholder agents
-        # In the future, load from config or dynamically
+        # Imported here to avoid circular imports at module load time.
         from jarvis.agents.content_creator import ContentCreatorAgent
         from jarvis.agents.video_editor import VideoEditorAgent
         from jarvis.agents.stream_clipper import StreamClipperAgent
@@ -50,7 +38,6 @@ class JarvisCore:
             SocialPosterAgent("Social Poster 1", self, AGENT_CONFIG["Social Poster 1"]["ai_model"]),
             EcommerceAgent("E-commerce Agent 1", self, AGENT_CONFIG["E-commerce Agent 1"]["ai_model"]),
             MarketingAgent("Marketing Agent 1", self, AGENT_CONFIG["Marketing Agent 1"]["ai_model"]),
-            # Add more agents as needed
         ]
 
     async def run(self):
@@ -112,14 +99,13 @@ Available commands:
     async def report_issue(self, agent_name: str, issue: str):
         """Receive issue reports from agents."""
         print(f"[JARVIS] Received issue from {agent_name}: {issue}")
-        # In the future, analyze the issue and provide solutions
         solution = await self._analyze_issue(issue)
         print(f"[JARVIS] Suggested solution: {solution}")
         return solution
 
     async def _analyze_issue(self, issue: str) -> str:
         """Analyze an issue and suggest a solution."""
-        # Simple rule-based analysis for now
+        # Simple rule-based analysis for now.
         if "conversion" in issue.lower():
             return "Try A/B testing different landing pages or offers."
         elif "ad spend" in issue.lower():
