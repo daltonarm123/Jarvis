@@ -10,7 +10,9 @@ ExecStart=/opt/jarvis/venv/bin/python -m jarvis.main
 Restart=always
 RestartSec=10
 Environment=PATH=/opt/jarvis/venv/bin
-EnvironmentFile=/opt/jarvis/.env
+Environment=JARVIS_MODE=autonomous
+Environment=JARVIS_AUTONOMOUS_INTERVAL=86400
+EnvironmentFile=-/opt/jarvis/.env
 
 # Security settings
 NoNewPrivileges=yes

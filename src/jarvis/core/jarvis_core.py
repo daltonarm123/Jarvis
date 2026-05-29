@@ -13,10 +13,12 @@ that's the single integration point.
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from typing import List, Optional
 
 from jarvis.agents import ALL_AGENTS, BaseAgent, TaskContext
+from jarvis.agents.manager_agent import ManagerAgent
 from jarvis.core.router import JarvisRouter
 from jarvis.memory import MemoryStore
 
@@ -27,7 +29,9 @@ class JarvisCore:
         self.memory = MemoryStore(os.getenv("DATA_DIR", "./data") + "/jarvis.db")
         self.agents: List[BaseAgent] = [cls() for cls in ALL_AGENTS]
         self.router = JarvisRouter(self.agents)
+        self.manager = ManagerAgent()
         self.autonomous_mode = os.getenv("JARVIS_MODE", "interactive") == "autonomous"
+        self.autonomous_interval = int(os.getenv("JARVIS_AUTONOMOUS_INTERVAL", str(24 * 60 * 60)))
 
     # ---------- main entry point ----------
 
@@ -81,6 +85,10 @@ class JarvisCore:
             return self._agents_text()
         if head == "status":
             return self._status_text()
+        if head in ("briefing", "daily", "standup"):
+            return await self._generate_daily_briefing()
+        if head == "plans":
+            return self._plans_text()
         if head == "remember":
             return self._cmd_remember(rest)
         if head == "facts":
@@ -105,6 +113,8 @@ class JarvisCore:
             "  /help                   Show this help\n"
             "  /agents                 List specialist agents\n"
             "  /status                 Provider + agent status\n"
+            "  /briefing               Generate the daily manager briefing\n"
+            "  /plans                  Show current agent plans\n"
             "  /remember key = value   Store a fact\n"
             "  /facts                  Show all stored facts\n"
             "  /session                Show current session id\n"
@@ -128,7 +138,8 @@ class JarvisCore:
             f"Mode: {'autonomous' if self.autonomous_mode else 'interactive'}\n"
             f"Providers configured: {configured or 'NONE'}\n"
             f"Providers available:  {all_p}\n"
-            f"Agents loaded: {len(self.agents)}"
+            f"Agents loaded: {len(self.agents)}\n"
+            f"Autonomous interval: {self.autonomous_interval}s"
         )
 
     @staticmethod
@@ -143,6 +154,10 @@ class JarvisCore:
     # ---------- legacy CLI loop ----------
 
     async def run(self) -> None:
+        if self.autonomous_mode:
+            await self._run_autonomous()
+            return
+
         from jarvis.communication.user_interface import UserInterface
         ui = UserInterface()
         print("Jarvis online. Type /help for commands. Ctrl-C or 'quit' to exit.\n")
@@ -160,3 +175,90 @@ class JarvisCore:
             await ui.send_output(reply)
         print("Shutting down Jarvis.")
         self.memory.close()
+
+    async def _run_autonomous(self) -> None:
+        print("Jarvis running in autonomous manager mode.")
+        try:
+            while True:
+                briefing = await self._generate_daily_briefing()
+                print("Daily briefing complete.\n")
+                print(briefing)
+                await asyncio.sleep(self.autonomous_interval)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            print("Shutting down autonomous Jarvis.")
+            self.memory.close()
+
+    async def _generate_daily_briefing(self) -> str:
+        facts = self.memory.all_facts()
+        facts_text = "\n".join(f"- {k}: {v}" for k, v in facts.items()) or "No stored facts."
+        recent = self.memory.recent_messages(self.session_id, limit=30)
+        convo_text = "\n".join(
+            f"{m['role']}({m.get('agent','')})> {m['content']}" for m in recent
+        ) or "No recent conversation."
+
+        prompt = (
+            "You are Manager Jarvis. Prepare a daily standup briefing for Dalton, the CEO.\n"
+            "Use the facts, recent conversation, and the specialist team to summarize current progress,\n"
+            "identify top opportunities, and assign clear priorities for today. Keep the output\n"
+            "professional, concise, and action-oriented. Include a short summary, three business\n"
+            "priorities, and what each specialist agent should focus on next.\n\n"
+            "Facts:\n"
+            f"{facts_text}\n\n"
+            "Recent conversation:\n"
+            f"{convo_text}\n\n"
+            "Specialist agents: "
+            f"{', '.join(a.name for a in self.agents)}\n"
+        )
+
+        ctx = TaskContext(
+            session_id=self.session_id,
+            user_input=prompt,
+            history=recent,
+            memory=self.memory,
+        )
+        briefing = await self.manager.handle(ctx)
+        self.memory.set_fact("last_daily_briefing", briefing)
+        self.memory.set_fact("last_daily_briefing_ts", time.time())
+
+        for agent in self.agents:
+            plan = await self._assign_agent_daily_plan(agent, briefing)
+            self.memory.set_agent_state(agent.name, {
+                "daily_plan": plan,
+                "last_briefing": briefing,
+                "updated": time.time(),
+            })
+
+        return briefing
+
+    async def _assign_agent_daily_plan(self, agent: BaseAgent, briefing: str) -> str:
+        plan_prompt = (
+            f"The manager briefing is below. You are {agent.name} specialist.\n"
+            "Based on the briefing, propose 3-5 concrete tasks you should work on today.\n"
+            "Format your response as short, numbered or bullet-pointed tasks.\n\n"
+            "Manager briefing:\n"
+            f"{briefing}"
+        )
+        recent = self.memory.recent_messages(self.session_id, limit=15)
+        ctx = TaskContext(
+            session_id=self.session_id,
+            user_input=plan_prompt,
+            history=recent,
+            memory=self.memory,
+        )
+        try:
+            return await agent.handle(ctx)
+        except Exception as e:
+            return f"[{agent.name}] error generating plan: {e}"
+
+    def _plans_text(self) -> str:
+        out = ["Current agent plans:"]
+        for agent in self.agents:
+            state = self.memory.get_agent_state(agent.name)
+            plan = state.get("daily_plan") if state else None
+            if plan:
+                out.append(f"\n{agent.name}:\n{plan}")
+            else:
+                out.append(f"{agent.name}: no plan available yet.")
+        return "\n".join(out)

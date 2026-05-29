@@ -6,7 +6,20 @@ import tempfile
 
 import pytest
 
-from jarvis.agents import ALL_AGENTS, DevAgent, ServerAgent, DiscordAgent, PersonalAgent
+from jarvis.agents import (
+    ALL_AGENTS,
+    DevAgent,
+    ServerAgent,
+    DiscordAgent,
+    PersonalAgent,
+    GrowthAgent,
+    ContentAgent,
+    ResearchAgent,
+    SocialAgent,
+    AnalyticsAgent,
+    MonetizationAgent,
+    OperationsAgent,
+)
 from jarvis.core.router import JarvisRouter
 from jarvis.memory import MemoryStore
 
@@ -40,6 +53,55 @@ def test_keyword_router_discord():
     router = JarvisRouter(agents)
     a = router._keyword_pick("Add a slash command to the wheel-spin discord bot")
     assert a.name == "discord"
+
+
+def test_keyword_router_growth():
+    agents = [cls() for cls in ALL_AGENTS]
+    router = JarvisRouter(agents)
+    a = router._keyword_pick("Research trending side hustles and monetization methods for short-form content")
+    assert a.name == "growth"
+
+
+def test_keyword_router_content():
+    agents = [cls() for cls in ALL_AGENTS]
+    router = JarvisRouter(agents)
+    a = router._keyword_pick("Help me write a viral TikTok hook and video script")
+    assert a.name == "content"
+
+
+def test_keyword_router_research():
+    agents = [cls() for cls in ALL_AGENTS]
+    router = JarvisRouter(agents)
+    a = router._keyword_pick("What is trending now in creator economy and short-form videos?")
+    assert a.name == "research"
+
+
+def test_keyword_router_social():
+    agents = [cls() for cls in ALL_AGENTS]
+    router = JarvisRouter(agents)
+    a = router._keyword_pick("Create a new TikTok account and schedule a short video post")
+    assert a.name == "social"
+
+
+def test_keyword_router_analytics():
+    agents = [cls() for cls in ALL_AGENTS]
+    router = JarvisRouter(agents)
+    a = router._keyword_pick("Analyze our video performance and tell me which posts are converting best")
+    assert a.name == "analytics"
+
+
+def test_keyword_router_monetization():
+    agents = [cls() for cls in ALL_AGENTS]
+    router = JarvisRouter(agents)
+    a = router._keyword_pick("How can we monetize our creator videos with sponsors or products?")
+    assert a.name == "monetization"
+
+
+def test_keyword_router_operations():
+    agents = [cls() for cls in ALL_AGENTS]
+    router = JarvisRouter(agents)
+    a = router._keyword_pick("Create a process for publishing daily faceless videos and outsourcing editing")
+    assert a.name == "operations"
 
 
 def test_keyword_router_personal_fallback():

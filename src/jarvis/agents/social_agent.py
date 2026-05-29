@@ -1,0 +1,285 @@
+"""Social Automation Jarvis — account creation, posting, and content distribution."""
+
+from __future__ import annotations
+
+import asyncio
+import re
+from typing import Any, Dict, List, Optional
+
+from jarvis.agents.base_agent import BaseAgent, Capability, TaskContext
+from jarvis.agents.credentials import CredentialVault, REQUIRED_CREDENTIALS, CREDENTIAL_DESCRIPTIONS
+from jarvis.platforms import get_connector, available_platforms
+
+
+PLATFORM_ALIASES = {
+    "tiktok": "tiktok",
+    "insta": "instagram",
+    "instagram": "instagram",
+    "fb": "facebook",
+    "facebook": "facebook",
+    "yt": "youtube",
+    "youtube": "youtube",
+}
+
+
+class SocialAgent(BaseAgent):
+    name = "social"
+    description = "Social account automation: create/manage accounts, publish short-form videos, and manage multi-platform posting."
+    provider = "openai"
+    model = "gpt-4o-mini"
+    system_prompt = (
+        "You are Social Jarvis. Your job is to manage faceless social media accounts and publish\n"
+        "short-form content across platforms like TikTok, Instagram, Facebook, and YouTube.\n"
+        "You can generate account creation plans, post descriptions, hashtags, and scheduling\n"
+        "instructions for multi-account workflows. You are not allowed to take action without\n"
+        "explicit approval from Jarvis, the manager. Always summarize what you plan to do and\n"
+        "why, then wait for managerial sign-off before posting or creating accounts."
+    )
+
+    def __init__(self) -> None:
+        self.platforms = available_platforms()
+
+    def _get_vault(self, ctx: TaskContext) -> CredentialVault:
+        state = self._load_state(ctx)
+        return CredentialVault(state)
+
+    @classmethod
+    def capabilities(cls) -> List[Capability]:
+        return [
+            Capability(
+                "social_accounts",
+                "Create and manage social accounts across platforms and handle posting workflows.",
+                ["tiktok", "instagram", "facebook", "youtube", "account", "create account",
+                 "multi-account", "post", "upload", "publish", "schedule", "reel", "shorts"],
+            ),
+            Capability(
+                "social_strategy",
+                "Plan social posting, captions, hashtags, and distribution for short-form content.",
+                ["caption", "hashtag", "trending", "viral", "engagement", "audience", "analytics"],
+            ),
+        ]
+
+    async def handle(self, ctx: TaskContext) -> str:
+        text = ctx.user_input.strip().lower()
+        if "add credentials" in text or ("for" in text and any(p in text for p in self.platforms)):
+            return await self._handle_credential_input(ctx)
+        if "create account" in text or "new account" in text:
+            return await self._handle_account_creation(ctx)
+        if "list accounts" in text or "accounts" in text:
+            return self._list_accounts(ctx)
+        if "post" in text or "publish" in text or "upload" in text:
+            return await self._handle_post_request(ctx)
+        return await super().handle(ctx)
+
+    def _load_state(self, ctx: TaskContext) -> Dict[str, Any]:
+        return ctx.memory.get_agent_state(self.name) or {}
+
+    def _save_state(self, ctx: TaskContext, state: Dict[str, Any]) -> None:
+        ctx.memory.set_agent_state(self.name, state)
+
+    def _normalize_platform(self, text: str) -> Optional[str]:
+        for alias, platform in PLATFORM_ALIASES.items():
+            if alias in text:
+                return platform
+        return None
+
+    def _find_account(self, ctx: TaskContext, platform: str) -> Optional[Dict[str, Any]]:
+        state = self._load_state(ctx)
+        accounts = state.get("accounts", [])
+        for account in accounts:
+            if account.get("platform") == platform:
+                vault = self._get_vault(ctx)
+                stored_creds = vault.get(platform, account.get("alias"))
+                if stored_creds:
+                    account["credentials"] = stored_creds
+                return account
+        return None
+
+    async def _handle_account_creation(self, ctx: TaskContext) -> str:
+        text = ctx.user_input.strip().lower()
+        platform = self._normalize_platform(text)
+        if not platform:
+            return (
+                "I can help register a new social account, but I need a target platform. "
+                "Please tell me whether this is TikTok, Instagram, Facebook, or YouTube."
+            )
+
+        alias_match = re.search(r"as ([a-zA-Z0-9_\-]+)", text)
+        alias = alias_match.group(1) if alias_match else f"{platform}_account"
+
+        vault = self._get_vault(ctx)
+        existing_creds = vault.get(platform, alias)
+        if existing_creds:
+            return (
+                f"An account already exists for {platform} as '{alias}'. "
+                f"Use '@social list accounts' to see registered accounts."
+            )
+
+        required_fields = REQUIRED_CREDENTIALS.get(platform, [])
+        if not required_fields:
+            return f"Platform '{platform}' is not supported yet."
+
+        prompt = self._build_credential_prompt(platform, required_fields)
+        return f"{prompt}\n\nOnce you have the credentials ready, provide them by saying: '@social add credentials for {platform} {alias}' and paste the details."
+
+    async def _handle_credential_input(self, ctx: TaskContext) -> str:
+        """Parse and store credentials from user input."""
+        text = ctx.user_input.strip()
+        platform_match = re.search(r"for\s+(\w+)\s+(\w+)", text, re.IGNORECASE)
+        if not platform_match:
+            return (
+                "I couldn't parse your credential input. Use format: "
+                "'add credentials for <platform> <alias>' followed by the credentials."
+            )
+
+        platform = self._normalize_platform(platform_match.group(1))
+        alias = platform_match.group(2)
+        if not platform:
+            return f"Platform '{platform_match.group(1)}' is not recognized."
+
+        required_fields = REQUIRED_CREDENTIALS.get(platform, [])
+        if not required_fields:
+            return f"Platform '{platform}' is not supported."
+
+        creds = self._extract_credentials_from_text(text, required_fields)
+        missing = [f for f in required_fields if f not in creds]
+        if missing:
+            return (
+                f"Missing credentials for {platform}: {', '.join(missing)}. "
+                f"Please provide all required fields."
+            )
+
+        vault = self._get_vault(ctx)
+        vault.store(platform, alias, creds)
+        state = self._load_state(ctx)
+        self._save_state(ctx, state)
+
+        account = {
+            "platform": platform,
+            "alias": alias,
+            "status": "active",
+            "has_credentials": True,
+        }
+        accounts = state.get("accounts", [])
+        accounts.append(account)
+        state["accounts"] = accounts
+        self._save_state(ctx, state)
+
+        return (
+            f"✓ Credentials for {platform} account '{alias}' have been securely stored. "
+            f"This account is now ready for posting."
+        )
+
+    def _build_credential_prompt(self, platform: str, required_fields: List[str]) -> str:
+        """Generate a credential collection prompt for the user."""
+        descriptions = CREDENTIAL_DESCRIPTIONS.get(platform, {})
+        lines = [f"To create a {platform.title()} account, I need the following credentials:\n"]
+        for field in required_fields:
+            desc = descriptions.get(field, field)
+            lines.append(f"  • {field}: {desc}")
+        return "\n".join(lines)
+
+    def _extract_credentials_from_text(self, text: str, required_fields: List[str]) -> Dict[str, str]:
+        """Parse credentials from user input using pattern matching."""
+        creds = {}
+        for field in required_fields:
+            patterns = [
+                rf"{field}\s*[:=]\s*['\"]?([^'\"]+?)['\"]?\s*(?:\n|$)",
+                rf"{field}\s*[:=]\s*([^\s]+)",
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    creds[field] = match.group(1).strip()
+                    break
+        return creds
+
+    async def _handle_post_request(self, ctx: TaskContext) -> str:
+        text = ctx.user_input.strip()
+        platform = self._normalize_platform(text.lower())
+        if not platform:
+            return (
+                "I can post content for TikTok, Instagram, Facebook, or YouTube, "
+                "but I couldn't detect the target platform. Please specify one."
+            )
+
+        account = self._find_account(ctx, platform)
+        if not account:
+            return (
+                f"No registered account found for {platform}. "
+                f"Create or register the account first with a command like 'create account for {platform}'."
+            )
+
+        if "credentials" not in account:
+            return (
+                f"Account '{account.get('alias')}' for {platform} exists but has no credentials stored. "
+                f"Add credentials by saying: '@social add credentials for {platform} {account.get('alias')}' "
+                f"and provide the required API tokens."
+            )
+
+        connector = get_connector(platform)
+        if "video" in text or "reel" in text or "short" in text:
+            video_path = self._extract_media_path(text)
+            if not video_path:
+                return (
+                    "I detected a video post request, but I need a local file path or remote video URL. "
+                    "Please provide the video source in your command."
+                )
+            title = self._extract_title(text) or f"New {platform.title()} video"
+            caption = self._extract_caption(text) or "Posted by Jarvis social automation."
+            tags = self._extract_tags(text)
+            result = await asyncio.to_thread(
+                connector.post_video,
+                platform,
+                account,
+                video_path,
+                title,
+                caption,
+                tags,
+            )
+            return f"Social publish result: {result}"
+
+        text_content = self._extract_caption(text) or text
+        result = await asyncio.to_thread(
+            connector.post_text,
+            platform,
+            account,
+            text_content,
+            None,
+        )
+        return f"Social publish result: {result}"
+
+    def _extract_media_path(self, text: str) -> Optional[str]:
+        match = re.search(r"(?:video|file|media)\s*(?:is|=|:)?\s*(https?://\S+|\S+\.(?:mp4|mov|m4v))", text, re.IGNORECASE)
+        return match.group(1) if match else None
+
+    def _extract_title(self, text: str) -> Optional[str]:
+        match = re.search(r"title\s*(?:is|=|:)?\s*'([^']+)'", text, re.IGNORECASE)
+        return match.group(1).strip() if match else None
+
+    def _extract_caption(self, text: str) -> Optional[str]:
+        match = re.search(r"caption\s*(?:is|=|:)?\s*'([^']+)'", text, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        return None
+
+    def _extract_tags(self, text: str) -> List[str]:
+        tags = re.findall(r"#([a-zA-Z0-9_]+)", text)
+        return tags
+
+    def _list_accounts(self, ctx: TaskContext) -> str:
+        state = self._load_state(ctx)
+        accounts = state.get("accounts", [])
+        if not accounts:
+            return "No social accounts are registered yet. Use 'create account for <platform>' to add one."
+
+        vault = self._get_vault(ctx)
+        lines = ["Registered social accounts:"]
+        for account in accounts:
+            platform = account.get("platform", "unknown")
+            alias = account.get("alias", "unnamed")
+            status = account.get("status", "unknown")
+            has_creds = vault.get(platform, alias) is not None
+            cred_status = "✓ credentials stored" if has_creds else "⚠ no credentials"
+            lines.append(f"  • {alias} ({platform}) - {status} [{cred_status}]")
+        return "\n".join(lines)

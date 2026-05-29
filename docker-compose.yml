@@ -6,6 +6,9 @@ services:
     container_name: jarvis-ai
     env_file:
       - .env
+    environment:
+      - JARVIS_MODE=autonomous
+      - JARVIS_AUTONOMOUS_INTERVAL=86400
     volumes:
       # Mount for logs or data persistence
       - ./logs:/app/logs
