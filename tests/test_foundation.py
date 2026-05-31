@@ -220,6 +220,28 @@ async def test_core_handles_help_without_keys(monkeypatch, tmp_path):
     assert "Session" in out3
 
 @pytest.mark.asyncio
+async def test_core_account_add_and_credentials(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from jarvis.core.jarvis_core import JarvisCore
+
+    j = JarvisCore()
+    out = await j.handle("/account add platform=instagram alias=insta_test")
+    assert "Account alias: insta_test" in out
+    out2 = await j.handle("/accounts")
+    assert "insta_test (instagram)" in out2
+    out3 = await j.handle("/account instagram")
+    assert "Accounts for instagram:" in out3
+
+    out4 = await j.handle(
+        "/account credentials platform=instagram alias=insta_test access_token=ABC123 instagram_business_account_id=98765"
+    )
+    assert "securely stored" in out4.lower()
+    state = j.memory.get_agent_state("social")
+    assert state["accounts"][0]["has_credentials"] is True
+
+@pytest.mark.asyncio
 async def test_core_profit_and_wake_phrase(monkeypatch, tmp_path):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

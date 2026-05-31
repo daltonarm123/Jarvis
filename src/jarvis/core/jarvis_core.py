@@ -113,7 +113,7 @@ class JarvisCore:
         if head in ("tasks", "work", "todo"):
             return self._tasks_text()
         if head in ("accounts", "account"):
-            return self._account_text(head, rest)
+            return await self._account_text(head, rest)
         if head == "schedule":
             return await self._schedule_text(rest)
         if head == "publish":
@@ -156,6 +156,8 @@ class JarvisCore:
             "  /tasks                  Show current team work plan\n"
             "  /accounts               List social accounts and credential status\n"
             "  /account <platform>     Show details for a social account\n"
+            "  /account add platform=<platform> alias=<alias>  Register a new social account\n"
+            "  /account credentials platform=<platform> alias=<alias> <fields>  Store account credentials\n"
             "  /schedule               Manage scheduled publishing jobs\n"
             "  /publish <now|status>   Trigger or inspect publishing\n"
             "  /health                 Show system health and issues\n"
@@ -322,10 +324,66 @@ class JarvisCore:
     def _tasks_text(self) -> str:
         return self.task_monitor.get_task_summary()
 
-    def _account_text(self, head: str, rest: str) -> str:
+    async def _account_text(self, head: str, rest: str) -> str:
+        if head == "accounts":
+            return self._list_accounts_text()
         if not rest:
             return self._list_accounts_text()
-        return self._account_detail_text(rest)
+
+        raw = rest.strip()
+        if raw.lower() in ("list", "show", "all"):
+            return self._list_accounts_text()
+
+        command_word = raw.split(maxsplit=1)[0].lower()
+        if command_word in ("add", "create", "remove", "delete", "credentials", "cred", "update"):
+            return await self._account_command_text(raw)
+
+        params = self._parse_key_value_args(raw)
+        platform = params.get("platform") or self._normalize_platform(raw)
+        if platform:
+            return self._account_detail_text(platform)
+
+        return self._list_accounts_text()
+
+    async def _account_command_text(self, raw: str) -> str:
+        parts = raw.split(maxsplit=1)
+        command = parts[0].lower()
+        args = parts[1] if len(parts) > 1 else ""
+        params = self._parse_key_value_args(args)
+
+        if command in ("add", "create"):
+            if "platform" in params:
+                phrase = f"create account for {params['platform']}"
+                if params.get("alias"):
+                    phrase += f" as {params['alias']}"
+                return await self._delegate_to_social_agent(phrase)
+            return await self._delegate_to_social_agent(raw)
+
+        if command in ("remove", "delete"):
+            if "platform" in params and "alias" in params:
+                return await self._delegate_to_social_agent(
+                    f"remove account for {params['platform']} {params['alias']}"
+                )
+            return await self._delegate_to_social_agent(raw)
+
+        if command in ("credentials", "cred", "update"):
+            if "platform" in params and "alias" in params:
+                credential_text = " ".join(
+                    f"{k}={v}"
+                    for k, v in params.items()
+                    if k not in ("platform", "alias")
+                )
+                phrase = f"add credentials for {params['platform']} {params['alias']} {credential_text}".strip()
+                return await self._delegate_to_social_agent(phrase)
+            return await self._delegate_to_social_agent(raw)
+
+        return self._list_accounts_text()
+
+    async def _delegate_to_social_agent(self, payload: str) -> str:
+        social = next((a for a in self.agents if a.name == "social"), None)
+        if not social:
+            return "Social agent not available."
+        return await self._dispatch(social, payload)
 
     def _list_accounts_text(self) -> str:
         state = self.memory.get_agent_state("social")
@@ -424,11 +482,17 @@ class JarvisCore:
         for item in due:
             account = self._find_social_account(item.platform, item.alias)
             if not account:
-                results.append(f"{item.id}: account {item.alias} not found for {item.platform}.")
+                results.append(
+                    f"{item.id}: account {item.alias} not found for {item.platform}. "
+                    f"Create it with '/account add platform={item.platform} alias={item.alias}'."
+                )
                 self.schedule_manager.set_schedule_status(item.id, "failed")
                 continue
             if not account.get("has_credentials"):
-                results.append(f"{item.id}: credentials missing for account {item.alias}.")
+                results.append(
+                    f"{item.id}: credentials missing for account {item.alias}. "
+                    f"Add them with '/account credentials platform={item.platform} alias={item.alias} <fields>'."
+                )
                 self.schedule_manager.set_schedule_status(item.id, "failed")
                 continue
             connector = get_connector(item.platform)
@@ -451,6 +515,21 @@ class JarvisCore:
         accounts = state.get("accounts", []) if state else []
         for account in accounts:
             if account.get("platform") == platform and account.get("alias") == alias:
+                social = next((a for a in self.agents if a.name == "social"), None)
+                if social:
+                    ctx = TaskContext(
+                        session_id=self.session_id,
+                        user_input="",
+                        history=[],
+                        memory=self.memory,
+                    )
+                    try:
+                        vault = social._get_vault(ctx)
+                        creds = vault.get(platform, alias)
+                        if creds:
+                            account["credentials"] = creds
+                    except Exception:
+                        pass
                 return account
         return None
 
