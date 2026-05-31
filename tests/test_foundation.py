@@ -18,6 +18,7 @@ from jarvis.agents import (
     AnalyticsAgent,
     MonetizationAgent,
     OperationsAgent,
+    TaskContext,
 )
 from jarvis.core.router import JarvisRouter
 from jarvis.memory import MemoryStore
@@ -94,6 +95,34 @@ def test_keyword_router_operations():
     router = JarvisRouter(agents)
     a = router._keyword_pick("Create a process for publishing daily faceless videos and outsourcing editing")
     assert a.name == "operations"
+
+
+def test_platform_registry_available_connectors():
+    from jarvis.platforms.registry import available_platforms, get_connector
+
+    platforms = available_platforms()
+    assert set(platforms) == {"facebook", "instagram", "tiktok", "youtube"}
+    assert get_connector("tiktok").name == "tiktok"
+    assert get_connector("instagram").name == "meta"
+
+
+@pytest.mark.asyncio
+async def test_social_agent_registers_account_and_stores_credentials(tmp_path):
+    memory = MemoryStore(str(tmp_path / "jarvis.db"))
+    agent = SocialAgent()
+    ctx = TaskContext(
+        session_id="s1",
+        user_input="create account for tiktok as tiktok_test",
+        history=[],
+        memory=memory,
+    )
+
+    out = await agent.handle(ctx)
+    assert "TikTok" in out or "account alias" in out
+    state = memory.get_agent_state("social")
+    assert state["accounts"][0]["platform"] == "tiktok"
+    assert state["accounts"][0]["alias"] == "tiktok_test"
+    memory.close()
 
 
 def test_keyword_router_personal_fallback():

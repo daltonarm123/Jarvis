@@ -60,11 +60,21 @@ class TikTokConnector(PlatformConnector):
         if not access_token or not username:
             return {"success": False, "message": "TikTok access token or account handle is missing."}
 
+        if not (video_path.startswith("http://") or video_path.startswith("https://")):
+            if not os.path.exists(video_path):
+                return {
+                    "success": False,
+                    "message": (
+                        "TikTok posting requires a valid local video path or a remote video URL. "
+                        "Provide a correct path to an MP4 file or a public URL."
+                    ),
+                }
+
         return {
             "success": False,
             "message": (
                 "TikTok posting is currently a placeholder in this release. "
-                "Provide a supported TikTok Business API integration to upload videos programmatically."
+                "Jarvis can still store the account and credentials, but actual upload requires a TikTok Business API integration."
             ),
         }
 

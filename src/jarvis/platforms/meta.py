@@ -101,30 +101,48 @@ class MetaGraphConnector(PlatformConnector):
         if not access_token or not insta_id:
             return {"success": False, "message": "Instagram account ID or access token is missing."}
 
-        media_resp = requests.post(
-            f"{GRAPH_BASE}/{insta_id}/media",
-            data={
-                "video_url": video_path,
-                "caption": caption,
-                "access_token": access_token,
-            },
-            timeout=60,
-        )
-        media_resp.raise_for_status()
-        creation_id = media_resp.json().get("id")
-        if not creation_id:
-            return {"success": False, "message": "Instagram media object creation failed."}
+        if video_path.startswith("http://") or video_path.startswith("https://"):
+            media_resp = requests.post(
+                f"{GRAPH_BASE}/{insta_id}/media",
+                data={
+                    "video_url": video_path,
+                    "caption": caption,
+                    "access_token": access_token,
+                },
+                timeout=60,
+            )
+            media_resp.raise_for_status()
+            creation_id = media_resp.json().get("id")
+            if not creation_id:
+                return {"success": False, "message": "Instagram media object creation failed."}
 
-        publish_resp = requests.post(
-            f"{GRAPH_BASE}/{insta_id}/media_publish",
-            data={
-                "creation_id": creation_id,
-                "access_token": access_token,
-            },
-            timeout=60,
-        )
-        publish_resp.raise_for_status()
-        return {"success": True, "platform": "instagram", "media_id": publish_resp.json().get("id")}
+            publish_resp = requests.post(
+                f"{GRAPH_BASE}/{insta_id}/media_publish",
+                data={
+                    "creation_id": creation_id,
+                    "access_token": access_token,
+                },
+                timeout=60,
+            )
+            publish_resp.raise_for_status()
+            return {"success": True, "platform": "instagram", "media_id": publish_resp.json().get("id")}
+
+        content, filename = self._load_file(video_path)
+        if content is not None:
+            return {
+                "success": False,
+                "message": (
+                    "Instagram video posting via Graph API only supports remote video URLs in this connector. "
+                    "Upload the file to a public URL and provide that URL instead."
+                ),
+            }
+
+        return {
+            "success": False,
+            "message": (
+                "I could not resolve the Instagram video source. Provide a valid remote URL or file path."
+            ),
+        }
 
     def _post_facebook_video(
         self,
@@ -138,27 +156,44 @@ class MetaGraphConnector(PlatformConnector):
         if not access_token or not page_id:
             return {"success": False, "message": "Facebook page ID or access token is missing."}
 
-        if not video_path.startswith("http://") and not video_path.startswith("https://"):
-            return {
-                "success": False,
-                "message": (
-                    "Facebook video posting currently requires a remote video URL. "
-                    "Provide a hosted video URL instead of a local file path."
-                ),
-            }
+        if video_path.startswith("http://") or video_path.startswith("https://"):
+            resp = requests.post(
+                f"{GRAPH_BASE}/{page_id}/videos",
+                data={
+                    "file_url": video_path,
+                    "title": title,
+                    "description": caption,
+                    "access_token": access_token,
+                },
+                timeout=120,
+            )
+            resp.raise_for_status()
+            return {"success": True, "platform": "facebook", "video_id": resp.json().get("id")}
 
-        resp = requests.post(
-            f"{GRAPH_BASE}/{page_id}/videos",
-            data={
-                "file_url": video_path,
+        content, filename = self._load_file(video_path)
+        if content is not None:
+            files = {"source": (filename, content, "video/mp4")}
+            data = {
                 "title": title,
                 "description": caption,
                 "access_token": access_token,
-            },
-            timeout=120,
-        )
-        resp.raise_for_status()
-        return {"success": True, "platform": "facebook", "video_id": resp.json().get("id")}
+            }
+            resp = requests.post(
+                f"{GRAPH_BASE}/{page_id}/videos",
+                data=data,
+                files=files,
+                timeout=120,
+            )
+            resp.raise_for_status()
+            return {"success": True, "platform": "facebook", "video_id": resp.json().get("id")}
+
+        return {
+            "success": False,
+            "message": (
+                "Facebook video posting requires a valid remote URL or a local video file path. "
+                "Provide a correct path or host the video at a public URL."
+            ),
+        }
 
     def _post_instagram_media(
         self,

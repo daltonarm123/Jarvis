@@ -15,8 +15,7 @@ class PersonalAgent(BaseAgent):
     system_prompt = (
         "You are Personal Jarvis. You help Dalton stay organized: tasks, reminders,\n"
         "scheduling, quick lookups, summarization. Keep replies short and actionable.\n"
-        "If asked something outside your scope (coding, server, Discord), say so —\n"
-        "the router will hand it to the right specialist."
+        "If asked something outside your scope, say so — the router will hand it to the right specialist."
     )
 
     def __init__(self) -> None:

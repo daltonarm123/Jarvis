@@ -62,25 +62,66 @@ class SocialAgent(BaseAgent):
 
     async def handle(self, ctx: TaskContext) -> str:
         text = ctx.user_input.strip().lower()
-        if "add credentials" in text or "update credentials" in text or ("for" in text and any(p in text for p in self.platforms)):
+        if "create account" in text or "new account" in text:
+            return await self._handle_account_creation(ctx)
+        if "add credentials" in text or "update credentials" in text or self._looks_like_credential_input(text):
             return await self._handle_credential_input(ctx)
         if "remove account" in text or "delete account" in text:
             return self._handle_account_removal(ctx)
         if "manage account" in text or "account details" in text or "show account" in text:
             return self._handle_account_management(ctx)
-        if "create account" in text or "new account" in text:
-            return await self._handle_account_creation(ctx)
         if "list accounts" in text or "accounts" in text:
             return self._list_accounts(ctx)
         if "post" in text or "publish" in text or "upload" in text:
             return await self._handle_post_request(ctx)
         return await super().handle(ctx)
 
+    def _looks_like_credential_input(self, text: str) -> bool:
+        if "for" not in text:
+            return False
+        if any(keyword in text for keyword in ["access_token", "page_id", "instagram_business_account_id"]):
+            return True
+        return "credentials" in text or "credential" in text
+
     def _load_state(self, ctx: TaskContext) -> Dict[str, Any]:
         return ctx.memory.get_agent_state(self.name) or {}
 
     def _save_state(self, ctx: TaskContext, state: Dict[str, Any]) -> None:
         ctx.memory.set_agent_state(self.name, state)
+
+    def _suggest_account_alias(self, ctx: TaskContext, platform: str) -> str:
+        state = self._load_state(ctx)
+        existing = {a.get("alias") for a in state.get("accounts", [])}
+        base_alias = f"{platform}_account"
+        alias = base_alias
+        counter = 1
+        while alias in existing:
+            counter += 1
+            alias = f"{base_alias}{counter}"
+        return alias
+
+    def _account_exists(self, ctx: TaskContext, platform: str, alias: str) -> bool:
+        state = self._load_state(ctx)
+        return any(
+            a.get("platform") == platform and a.get("alias") == alias
+            for a in state.get("accounts", [])
+        )
+
+    def _register_account(self, ctx: TaskContext, platform: str, alias: str, status: str = "pending") -> None:
+        state = self._load_state(ctx)
+        accounts = state.get("accounts", [])
+        if not any(a.get("platform") == platform and a.get("alias") == alias for a in accounts):
+            accounts.append(
+                {
+                    "platform": platform,
+                    "alias": alias,
+                    "status": status,
+                    "notes": "",
+                    "has_credentials": False,
+                }
+            )
+            state["accounts"] = accounts
+            self._save_state(ctx, state)
 
     def _normalize_platform(self, text: str) -> Optional[str]:
         for alias, platform in PLATFORM_ALIASES.items():
@@ -109,23 +150,26 @@ class SocialAgent(BaseAgent):
                 "Please tell me whether this is TikTok, Instagram, Facebook, or YouTube."
             )
 
-        alias_match = re.search(r"as ([a-zA-Z0-9_\-]+)", text)
-        alias = alias_match.group(1) if alias_match else f"{platform}_account"
-
-        vault = self._get_vault(ctx)
-        existing_creds = vault.get(platform, alias)
-        if existing_creds:
+        alias_match = re.search(r"as\s+([a-zA-Z0-9_\-]+)", text, re.IGNORECASE)
+        alias = alias_match.group(1) if alias_match else self._suggest_account_alias(ctx, platform)
+        if self._account_exists(ctx, platform, alias):
             return (
                 f"An account already exists for {platform} as '{alias}'. "
                 f"Use '@social list accounts' to see registered accounts."
             )
 
-        required_fields = REQUIRED_CREDENTIALS.get(platform, [])
-        if not required_fields:
-            return f"Platform '{platform}' is not supported yet."
+        connector = get_connector(platform)
+        result = connector.create_account(platform, alias, {})
+        status = "active" if result.get("success") else "pending"
+        self._register_account(ctx, platform, alias, status=status)
 
-        prompt = self._build_credential_prompt(platform, required_fields)
-        return f"{prompt}\n\nOnce you have the credentials ready, provide them by saying: '@social add credentials for {platform} {alias}' and paste the details."
+        prompt = self._build_credential_prompt(platform, REQUIRED_CREDENTIALS.get(platform, []))
+        return (
+            f"{result.get('message', 'Account registered successfully.')}\n\n"
+            f"Account alias: {alias}. "
+            f"Once you have the credentials ready, add them by saying: '@social add credentials for {platform} {alias}'.\n"
+            f"{prompt}"
+        )
 
     async def _handle_credential_input(self, ctx: TaskContext) -> str:
         """Parse and store credentials from user input."""
@@ -157,16 +201,19 @@ class SocialAgent(BaseAgent):
         vault = self._get_vault(ctx)
         vault.store(platform, alias, creds)
         state = self._load_state(ctx)
-        self._save_state(ctx, state)
 
-        account = {
-            "platform": platform,
-            "alias": alias,
-            "status": "active",
-            "has_credentials": True,
-        }
+        if not self._account_exists(ctx, platform, alias):
+            self._register_account(ctx, platform, alias, status="active")
+            state = self._load_state(ctx)
+
         accounts = state.get("accounts", [])
-        accounts.append(account)
+        for account in accounts:
+            if account.get("platform") == platform and account.get("alias") == alias:
+                account["status"] = "active"
+                account["has_credentials"] = True
+                account["last_activity"] = "credentials_added"
+                break
+
         state["accounts"] = accounts
         self._save_state(ctx, state)
 
@@ -224,6 +271,9 @@ class SocialAgent(BaseAgent):
 
         connector = get_connector(platform)
         if "video" in text or "reel" in text or "short" in text:
+            if not connector.supports_video_posting():
+                return f"{platform.title()} does not support video posting through the configured connector."
+
             video_path = self._extract_media_path(text)
             if not video_path:
                 return (
@@ -242,17 +292,33 @@ class SocialAgent(BaseAgent):
                 caption,
                 tags,
             )
-            return f"Social publish result: {result}"
+            return self._format_connector_result(result)
 
-        text_content = self._extract_caption(text) or text
-        result = await asyncio.to_thread(
-            connector.post_text,
-            platform,
-            account,
-            text_content,
-            None,
+        if connector.supports_text_posting():
+            text_content = self._extract_caption(text) or text
+            result = await asyncio.to_thread(
+                connector.post_text,
+                platform,
+                account,
+                text_content,
+                None,
+            )
+            return self._format_connector_result(result)
+
+        return (
+            f"{platform.title()} connector can only publish videos or requires a proper media URL/file. "
+            "Please include a video request if you want to publish something."
         )
-        return f"Social publish result: {result}"
+
+    def _format_connector_result(self, result: Dict[str, Any]) -> str:
+        if not isinstance(result, dict):
+            return "Social publish returned an unexpected response."
+        if result.get("success"):
+            details = ", ".join(
+                f"{k}={v}" for k, v in result.items() if k != "success"
+            )
+            return f"Social publish succeeded: {details or 'done'}."
+        return f"Social publish failed: {result.get('message', 'Unknown error')}"
 
     def _handle_account_management(self, ctx: TaskContext) -> str:
         text = ctx.user_input.strip().lower()
