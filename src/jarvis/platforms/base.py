@@ -35,6 +35,10 @@ class PlatformConnector(ABC):
         details: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Create a new account or register the account details."""
+        return {
+            "success": False,
+            "message": "Account creation is not available through this connector.",
+        }
 
     @abstractmethod
     def post_video(

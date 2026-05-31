@@ -161,11 +161,25 @@ class SocialAgent(BaseAgent):
         connector = get_connector(platform)
         result = connector.create_account(platform, alias, {})
         status = "active" if result.get("success") else "pending"
+        account_info = result.get("account_info", {})
         self._register_account(ctx, platform, alias, status=status)
 
+        state = self._load_state(ctx)
+        accounts = state.get("accounts", [])
+        for account in accounts:
+            if account.get("platform") == platform and account.get("alias") == alias:
+                account["connector_info"] = account_info
+                account["status"] = status
+                break
+        state["accounts"] = accounts
+        self._save_state(ctx, state)
+
         prompt = self._build_credential_prompt(platform, REQUIRED_CREDENTIALS.get(platform, []))
+        instructions = result.get("message", "Account registered successfully.")
+        if account_info:
+            instructions += "\n" + account_info.get("notes", "")
         return (
-            f"{result.get('message', 'Account registered successfully.')}\n\n"
+            f"{instructions}\n\n"
             f"Account alias: {alias}. "
             f"Once you have the credentials ready, add them by saying: '@social add credentials for {platform} {alias}'.\n"
             f"{prompt}"

@@ -44,6 +44,10 @@ class MetaGraphConnector(PlatformConnector):
                 "Jarvis can register credentials and track the account after creation. "
                 "Provide access tokens and account identifiers so the social team can post on behalf of the account."
             ),
+            "account_info": {
+                "requires_page_or_business_id": True,
+                "notes": "Use Facebook Page access tokens or Instagram Business Account IDs for posting.",
+            },
         }
 
     def post_video(

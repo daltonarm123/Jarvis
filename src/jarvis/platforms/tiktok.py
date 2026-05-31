@@ -40,6 +40,10 @@ class TikTokConnector(PlatformConnector):
                 "TikTok account creation is not available through the public API in this connector. "
                 "Jarvis can still track account credentials and use stored access tokens to publish when available."
             ),
+            "account_info": {
+                "needs_oauth": True,
+                "notes": "Provide a TikTok Business API access token or account handle for publishing.",
+            },
         }
 
     def post_video(

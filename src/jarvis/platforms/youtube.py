@@ -42,6 +42,10 @@ class YouTubeConnector(PlatformConnector):
                 "YouTube account creation is not available through the API. "
                 "Jarvis can track account credentials and use an OAuth access token to publish videos."
             ),
+            "account_info": {
+                "requires_oauth": True,
+                "notes": "Provide a YouTube OAuth access token for the target channel.",
+            },
         }
 
     def post_video(

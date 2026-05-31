@@ -106,22 +106,63 @@ def test_platform_registry_available_connectors():
     assert get_connector("instagram").name == "meta"
 
 
+@pytest.mark.parametrize(
+    "platform,alias",
+    [
+        ("tiktok", "tiktok_test"),
+        ("instagram", "insta_test"),
+        ("facebook", "fb_page"),
+        ("youtube", "yt_channel"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_social_agent_registers_account_and_stores_credentials(tmp_path):
+async def test_social_agent_can_create_accounts_for_all_platforms(tmp_path, platform, alias):
     memory = MemoryStore(str(tmp_path / "jarvis.db"))
     agent = SocialAgent()
     ctx = TaskContext(
         session_id="s1",
-        user_input="create account for tiktok as tiktok_test",
+        user_input=f"create account for {platform} as {alias}",
         history=[],
         memory=memory,
     )
 
     out = await agent.handle(ctx)
-    assert "TikTok" in out or "account alias" in out
+    assert "Account alias" in out
     state = memory.get_agent_state("social")
-    assert state["accounts"][0]["platform"] == "tiktok"
-    assert state["accounts"][0]["alias"] == "tiktok_test"
+    assert len(state.get("accounts", [])) == 1
+    assert state["accounts"][0]["platform"] == platform
+    assert state["accounts"][0]["alias"] == alias
+    assert state["accounts"][0]["status"] in {"pending", "active"}
+    assert "credentials" not in state["accounts"][0] or state["accounts"][0]["has_credentials"] is False
+    memory.close()
+
+
+@pytest.mark.asyncio
+async def test_social_agent_stores_credentials_for_existing_account(tmp_path):
+    memory = MemoryStore(str(tmp_path / "jarvis.db"))
+    agent = SocialAgent()
+    create_ctx = TaskContext(
+        session_id="s2",
+        user_input="create account for youtube as yt_test",
+        history=[],
+        memory=memory,
+    )
+    await agent.handle(create_ctx)
+
+    update_ctx = TaskContext(
+        session_id="s2",
+        user_input=(
+            "add credentials for youtube yt_test "
+            "access_token=ABC123"
+        ),
+        history=[],
+        memory=memory,
+    )
+    out = await agent.handle(update_ctx)
+    assert "Credentials for youtube account 'yt_test' have been securely stored" in out
+
+    state = memory.get_agent_state("social")
+    assert state["accounts"][0]["has_credentials"] is True
     memory.close()
 
 
