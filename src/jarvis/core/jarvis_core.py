@@ -22,10 +22,11 @@ from typing import List, Optional
 from jarvis.agents import ALL_AGENTS, BaseAgent, TaskContext
 from jarvis.agents.manager_agent import ManagerAgent
 from jarvis.communication.voice_interface import VoiceInterface
-from jarvis.core.automation import TaskMonitor
+from jarvis.core.automation import ScheduleManager, TaskMonitor
 from jarvis.core.router import JarvisRouter
 from jarvis.core.health import HealthMonitor
 from jarvis.memory import MemoryStore
+from jarvis.platforms.registry import get_connector
 
 
 class JarvisCore:
@@ -37,6 +38,7 @@ class JarvisCore:
         self.manager = ManagerAgent()
         self.health = HealthMonitor()
         self.task_monitor = TaskMonitor(self.memory)
+        self.schedule_manager = ScheduleManager(self.memory)
         self.autonomous_mode = os.getenv("JARVIS_MODE", "interactive") == "autonomous"
         self.autonomous_interval = int(os.getenv("JARVIS_AUTONOMOUS_INTERVAL", str(24 * 60 * 60)))
 
@@ -110,6 +112,12 @@ class JarvisCore:
             return self._plans_text()
         if head in ("tasks", "work", "todo"):
             return self._tasks_text()
+        if head in ("accounts", "account"):
+            return self._account_text(head, rest)
+        if head == "schedule":
+            return await self._schedule_text(rest)
+        if head == "publish":
+            return await self._publish_text(rest)
         if head in ("profit", "revenue"):
             return self._profit_text()
         if head in ("issues", "health"):
@@ -146,6 +154,10 @@ class JarvisCore:
             "  /briefing               Generate the daily manager briefing\n"
             "  /plans                  Show current agent plans\n"
             "  /tasks                  Show current team work plan\n"
+            "  /accounts               List social accounts and credential status\n"
+            "  /account <platform>     Show details for a social account\n"
+            "  /schedule               Manage scheduled publishing jobs\n"
+            "  /publish <now|status>   Trigger or inspect publishing\n"
             "  /health                 Show system health and issues\n"
             "  /escalate               Escalate issues to dev agent for fixes\n"
             "  /ask <question>         Ask Jarvis any general question\n"
@@ -309,6 +321,163 @@ class JarvisCore:
 
     def _tasks_text(self) -> str:
         return self.task_monitor.get_task_summary()
+
+    def _account_text(self, head: str, rest: str) -> str:
+        if not rest:
+            return self._list_accounts_text()
+        return self._account_detail_text(rest)
+
+    def _list_accounts_text(self) -> str:
+        state = self.memory.get_agent_state("social")
+        accounts = state.get("accounts", []) if state else []
+        if not accounts:
+            return "No social accounts are registered yet. Use '/account <platform>' or 'create account for <platform>'."
+        lines = ["Social accounts:"]
+        for account in accounts:
+            alias = account.get("alias", "unnamed")
+            platform = account.get("platform", "unknown")
+            status = account.get("status", "unknown")
+            cred_flag = "✓" if account.get("has_credentials") else "⚠"
+            lines.append(f"  • {alias} ({platform}) - {status} [{cred_flag} credentials]")
+        return "\n".join(lines)
+
+    def _account_detail_text(self, rest: str) -> str:
+        platform = self._normalize_platform(rest.lower())
+        if not platform:
+            return "Please specify which platform account to show: TikTok, Instagram, Facebook, or YouTube."
+        state = self.memory.get_agent_state("social")
+        accounts = state.get("accounts", []) if state else []
+        matches = [a for a in accounts if a.get("platform") == platform]
+        if not matches:
+            return f"No registered account found for {platform}. Use '/account' to list accounts."
+        lines = [f"Accounts for {platform}:"]
+        for account in matches:
+            alias = account.get("alias", "unnamed")
+            status = account.get("status", "unknown")
+            notes = account.get("notes", "none")
+            creds = "yes" if account.get("has_credentials") else "no"
+            lines.append(f"  • {alias}: status={status}, credentials={creds}, notes={notes}")
+        return "\n".join(lines)
+
+    async def _schedule_text(self, rest: str) -> str:
+        if not rest or rest.strip() in ("list", "show", "all"):
+            return self.schedule_manager.get_schedule_summary()
+
+        parts = rest.strip().split(maxsplit=1)
+        command = parts[0].lower()
+        args = parts[1] if len(parts) > 1 else ""
+
+        if command in ("add", "create"):
+            params = self._parse_key_value_args(args)
+            missing = [k for k in ("platform", "alias", "video_path", "title", "caption", "when") if k not in params]
+            if missing:
+                return (
+                    "Missing schedule fields: " + ", ".join(missing) + ". "
+                    "Use '/schedule add platform=<platform> alias=<alias> video_path=<path> title='<title>' caption='<caption>' when=<when> tags=<tag1,tag2>'."
+                )
+            tags = [t.strip() for t in params.get("tags", "").replace("#", "").split(",") if t.strip()]
+            item = self.schedule_manager.add_schedule(
+                platform=params["platform"],
+                alias=params["alias"],
+                video_path=params["video_path"],
+                title=params["title"],
+                caption=params["caption"],
+                tags=tags,
+                when=params["when"],
+            )
+            return f"Scheduled post {item.id} for {item.platform}/{item.alias} at {time.strftime('%Y-%m-%d %H:%M', time.localtime(item.scheduled_at))}."
+
+        if command in ("run", "execute", "due"):
+            return await self._run_scheduled_posts()
+
+        if command in ("remove", "delete"):
+            if not args:
+                return "Specify the schedule ID to remove: '/schedule remove <id>'."
+            removed = self.schedule_manager.remove_schedule(args.strip())
+            return "Schedule removed." if removed else "Schedule ID not found."
+
+        return (
+            "Schedule commands:\n"
+            "  /schedule list\n"
+            "  /schedule add platform=<platform> alias=<alias> video_path=<path> title='<title>' caption='<caption>' when=<when> tags=<tag1,tag2>\n"
+            "  /schedule run\n"
+            "  /schedule remove <id>\n"
+        )
+
+    async def _publish_text(self, rest: str) -> str:
+        if not rest or rest.strip() == "status":
+            return self.schedule_manager.get_schedule_summary()
+        if rest.strip() == "now":
+            return await self._run_scheduled_posts()
+        return "Use '/publish now' to execute due scheduled posts or '/publish status' to inspect the queue."
+
+    async def _run_scheduled_posts(self) -> str:
+        due = self.schedule_manager.get_due_schedules()
+        if not due:
+            return "No scheduled posts are due right now."
+
+        results = []
+        social = next((a for a in self.agents if a.name == "social"), None)
+        if not social:
+            return "Social agent not available for publishing."
+
+        for item in due:
+            account = self._find_social_account(item.platform, item.alias)
+            if not account:
+                results.append(f"{item.id}: account {item.alias} not found for {item.platform}.")
+                self.schedule_manager.set_schedule_status(item.id, "failed")
+                continue
+            if not account.get("has_credentials"):
+                results.append(f"{item.id}: credentials missing for account {item.alias}.")
+                self.schedule_manager.set_schedule_status(item.id, "failed")
+                continue
+            connector = get_connector(item.platform)
+            result = await asyncio.to_thread(
+                connector.post_video,
+                item.platform,
+                account,
+                item.video_path,
+                item.title,
+                item.caption,
+                item.tags,
+            )
+            status = "completed" if result.get("success") else "failed"
+            self.schedule_manager.set_schedule_status(item.id, status)
+            results.append(f"{item.id}: {result.get('message', 'Done')} [{status}]")
+        return "\n".join(results)
+
+    def _find_social_account(self, platform: str, alias: str) -> Optional[Dict[str, Any]]:
+        state = self.memory.get_agent_state("social")
+        accounts = state.get("accounts", []) if state else []
+        for account in accounts:
+            if account.get("platform") == platform and account.get("alias") == alias:
+                return account
+        return None
+
+    def _normalize_platform(self, text: str) -> Optional[str]:
+        platform = text.strip().lower()
+        if platform in ("tiktok", "tt"):
+            return "tiktok"
+        if platform in ("instagram", "ig", "insta"):
+            return "instagram"
+        if platform in ("facebook", "fb"):
+            return "facebook"
+        if platform in ("youtube", "yt"):
+            return "youtube"
+        return None
+
+    def _parse_key_value_args(self, text: str) -> Dict[str, str]:
+        params: Dict[str, str] = {}
+        if not text:
+            return params
+        pattern = r"(\w+)=('(?:[^']*)'|\"(?:[^\"]*)\"|[^\s]+)"
+        for match in re.finditer(pattern, text):
+            key = match.group(1)
+            value = match.group(2)
+            if value.startswith("'") and value.endswith("'") or value.startswith('"') and value.endswith('"'):
+                value = value[1:-1]
+            params[key] = value
+        return params
 
     def _health_text(self) -> str:
         critical = self.health.get_critical_issues()
