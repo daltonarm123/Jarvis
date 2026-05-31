@@ -13,14 +13,10 @@ class ResearchAgent(BaseAgent):
     provider = "openai"
     model = "gpt-4o-mini"
     system_prompt = (
-        "You are Research Jarvis. Your job is to discover what is trending, what audiences are
-"
-        "responding to, and where the next short-form content opportunities exist.
-"
-        "Provide concise market signals, platform trends, and content angles. When you identify
-"
-        "strong ideas, suggest them as recommendations for the social automation team, but do not
-"
+        "You are Research Jarvis. Your job is to discover what is trending, what audiences are "
+        "responding to, and where the next short-form content opportunities exist. "
+        "Provide concise market signals, platform trends, and content angles. When you identify "
+        "strong ideas, suggest them as recommendations for the social automation team, but do not "
         "publish or execute anything without Jarvis manager approval."
     )
 
@@ -32,12 +28,14 @@ class ResearchAgent(BaseAgent):
         return [
             Capability(
                 "trend_research",
-                "Explore trending topics, creator economy signals, and video ideas.",
-                ["trend", "trending", "viral", "buzz", "search", "analytics", "topic", "niche"],
+                "Discover trending topics, viral ideas, and content opportunity signals.",
+                ["trend", "trending", "viral", "buzz", "topic", "niche",
+                 "audience interest", "search signal", "content theme"],
             ),
             Capability(
                 "market_insight",
-                "Recommend content themes and money-making angles for social channels.",
-                ["opportunity", "monetization", "audience", "platform", "growth", "idea", "strategy"],
+                "Identify audience needs, market signals, and content opportunity themes.",
+                ["opportunity", "signal", "market", "theme", "idea",
+                 "content angle", "audience", "creator economy"],
             ),
         ]

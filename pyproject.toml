@@ -23,6 +23,10 @@ social = [
     "discord.py>=2.4.0",
     "slack-sdk>=3.27.0",
 ]
+voice = [
+    "SpeechRecognition>=3.8.1",
+    "pyttsx3>=2.90",
+]
 test = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

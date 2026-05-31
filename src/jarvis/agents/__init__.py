@@ -2,8 +2,7 @@
 
 from .base_agent import BaseAgent, Capability, TaskContext
 from .dev_agent import DevAgent
-from .server_agent import ServerAgent
-from .discord_agent import DiscordAgent
+from .prompt_agent import PromptAgent
 from .personal_agent import PersonalAgent
 from .growth_agent import GrowthAgent
 from .content_agent import ContentAgent
@@ -15,8 +14,7 @@ from .operations_agent import OperationsAgent
 
 ALL_AGENTS = [
     DevAgent,
-    ServerAgent,
-    DiscordAgent,
+    PromptAgent,
     PersonalAgent,
     GrowthAgent,
     ContentAgent,
@@ -32,8 +30,7 @@ __all__ = [
     "Capability",
     "TaskContext",
     "DevAgent",
-    "ServerAgent",
-    "DiscordAgent",
+    "PromptAgent",
     "PersonalAgent",
     "GrowthAgent",
     "ContentAgent",

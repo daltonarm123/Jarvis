@@ -13,12 +13,9 @@ class OperationsAgent(BaseAgent):
     provider = "openai"
     model = "gpt-4o-mini"
     system_prompt = (
-        "You are Operations Jarvis. You design repeatable systems that let Dalton scale his
-"
-        "social publishing business with minimal hands-on work. Create clear operating
-"
-        "procedures, automation checklists, task delegation plans, and quality-control steps.
-"
+        "You are Operations Jarvis. You design repeatable systems that let Dalton scale his "
+        "social publishing business with minimal hands-on work. Create clear operating "
+        "procedures, automation checklists, task delegation plans, and quality-control steps. "
         "Focus on reliable execution and reducing manual overhead."
     )
 
@@ -30,13 +27,14 @@ class OperationsAgent(BaseAgent):
         return [
             Capability(
                 "processes",
-                "Design SOPs, automation workflows, task delegation, and scaling systems.",
+                "Design SOPs, automation workflows, and quality systems.",
                 ["process", "workflow", "system", "operations", "automation", "sop",
                  "delegate", "quality", "checklist", "scaling"],
             ),
             Capability(
                 "execution",
-                "Plan operational execution for content publishing, outreach, and team work.",
-                ["execute", "task", "manage", "operate", "run", "deploy", "schedule"],
+                "Plan execution systems for content publishing and team coordination.",
+                ["execution", "deployment", "coordination", "handoff", "launch",
+                 "procedure", "system execution", "publish workflow"],
             ),
         ]

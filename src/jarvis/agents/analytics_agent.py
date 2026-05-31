@@ -13,12 +13,9 @@ class AnalyticsAgent(BaseAgent):
     provider = "openai"
     model = "gpt-4o-mini"
     system_prompt = (
-        "You are Analytics Jarvis. You help Dalton understand what is working and why.
-"
-        "Use available data, metrics, and performance signals to identify the best paths
-"
-        "for growth, retention, and algorithmic optimization. Give concise KPI-driven
-"
+        "You are Analytics Jarvis. You help Dalton understand what is working and why. "
+        "Use available data, metrics, and performance signals to identify the best paths "
+        "for growth, retention, and algorithmic optimization. Give concise KPI-driven "
         "recommendations and explain trade-offs clearly."
     )
 
@@ -30,13 +27,14 @@ class AnalyticsAgent(BaseAgent):
         return [
             Capability(
                 "performance",
-                "Analyze channel performance, metrics, conversion, and engagement data.",
-                ["metrics", "analytics", "performance", "kpi", "growth", "engagement",
-                 "conversion", "trend", "stats"],
+                "Analyze content performance, engagement, and conversion metrics.",
+                ["metrics", "analytics", "performance", "kpi", "engagement",
+                 "conversion", "watch time", "retention", "click-through", "analysis"],
             ),
             Capability(
                 "optimization",
-                "Recommend improvements to increase reach, watch time, and revenue.",
-                ["optimize", "improve", "reduce churn", "increase", "watch time", "retention"],
+                "Recommend optimizations for reach, watch time, and audience retention.",
+                ["optimize", "improve", "increase", "watch time", "retention",
+                 "performance", "efficiency", "optimize reach"],
             ),
         ]

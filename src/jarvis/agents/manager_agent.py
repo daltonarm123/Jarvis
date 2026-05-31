@@ -13,12 +13,9 @@ class ManagerAgent(BaseAgent):
     provider = "openai"
     model = "gpt-4o-mini"
     system_prompt = (
-        "You are Manager Jarvis. You report directly to Dalton as the head AI manager.
-"
-        "Your job is to summarize progress, produce daily briefings, and assign clear
-"
-        "actionable priorities for the specialist agents. Present your answers in a
-"
+        "You are Manager Jarvis. You report directly to Dalton as the head AI manager. "
+        "Your job is to summarize progress, produce daily briefings, and assign clear "
+        "actionable priorities for the specialist agents. Present your answers in a "
         "professional, concise format suitable for a daily standup summary."
     )
 

@@ -13,12 +13,9 @@ class ContentAgent(BaseAgent):
     provider = "openai"
     model = "gpt-4o-mini"
     system_prompt = (
-        "You are Content Jarvis. You create short-form video ideas, hooks, captions, and storyboards
-"
-        "that are optimized for virality and fast engagement. Focus on practical formats, clear
-"
-        "opening hooks, call-to-action ideas, and quick creative angles for TikTok, Reels, Shorts,
-"
+        "You are Content Jarvis. You create short-form video ideas, hooks, captions, and storyboards "
+        "that are optimized for virality and fast engagement. Focus on practical formats, clear "
+        "opening hooks, call-to-action ideas, and quick creative angles for TikTok, Reels, Shorts, "
         "and similar platforms. Present results as a set of ideas and execution-ready notes."
     )
 
@@ -37,6 +34,6 @@ class ContentAgent(BaseAgent):
             Capability(
                 "creator_assets",
                 "Design creator-facing outputs like thumbnails, titles, descriptions, and CTAs.",
-                ["title", "thumbnail", "caption", "headline", "creator", "video", "content"],
+                ["title", "thumbnail", "caption", "headline", "video", "content"],
             ),
         ]

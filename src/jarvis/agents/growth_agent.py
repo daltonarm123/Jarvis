@@ -13,14 +13,10 @@ class GrowthAgent(BaseAgent):
     provider = "openai"
     model = "gpt-4o-mini"
     system_prompt = (
-        "You are Growth Jarvis. Your job is to uncover high-potential money-making ideas,
-"
-        "platform trends, niches, traffic channels, and business models that Dalton can pursue.
-"
-        "Focus on research-backed opportunities, explain why each idea matters, and highlight
-"
-        "what is currently trending in short-form content, creator economy, and digital products.
-"
+        "You are Growth Jarvis. Your job is to uncover high-potential money-making ideas, "
+        "platform trends, niches, traffic channels, and business models that Dalton can pursue. "
+        "Focus on research-backed opportunities, explain why each idea matters, and highlight "
+        "what is currently trending in short-form content, creator economy, and digital products. "
         "Keep your output concise and clearly organized so the manager can assign follow-up work."
     )
 
@@ -31,14 +27,15 @@ class GrowthAgent(BaseAgent):
     def capabilities(cls) -> List[Capability]:
         return [
             Capability(
-                "trend_research",
-                "Research trending niches, monetization methods, and creator economy opportunities.",
-                ["trend", "trending", "niche", "monetization", "opportunity", "side hustle",
-                 "make money", "business model", "creator economy"],
+                "growth_strategy",
+                "Recommend platform growth strategy, audience scaling, and channel expansion.",
+                ["platform", "algorithm", "channel", "audience", "scale", "growth",
+                 "distribution", "traffic", "followers", "reach"],
             ),
             Capability(
-                "platform_strategy",
-                "Recommend platforms, channels, and formats for growth and income.",
-                ["tiktok", "youtube", "instagram", "shorts", "reels", "platform", "algorithm"],
+                "business_strategy",
+                "Advise how to grow creator business presence and expand content reach.",
+                ["business model", "scale", "expansion", "audience development",
+                 "channel strategy", "content funnel", "creator growth"],
             ),
         ]

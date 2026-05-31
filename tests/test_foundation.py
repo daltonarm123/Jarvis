@@ -9,8 +9,7 @@ import pytest
 from jarvis.agents import (
     ALL_AGENTS,
     DevAgent,
-    ServerAgent,
-    DiscordAgent,
+    PromptAgent,
     PersonalAgent,
     GrowthAgent,
     ContentAgent,
@@ -41,24 +40,17 @@ def test_keyword_router_dev():
     assert a.name == "dev"
 
 
-def test_keyword_router_server():
+def test_keyword_router_prompt():
     agents = [cls() for cls in ALL_AGENTS]
     router = JarvisRouter(agents)
-    a = router._keyword_pick("My QB-Core garage script isn't working in Bloodmark RP")
-    assert a.name == "server"
-
-
-def test_keyword_router_discord():
-    agents = [cls() for cls in ALL_AGENTS]
-    router = JarvisRouter(agents)
-    a = router._keyword_pick("Add a slash command to the wheel-spin discord bot")
-    assert a.name == "discord"
+    a = router._keyword_pick("Review this video prompt and make sure the hook is strong")
+    assert a.name == "prompt"
 
 
 def test_keyword_router_growth():
     agents = [cls() for cls in ALL_AGENTS]
     router = JarvisRouter(agents)
-    a = router._keyword_pick("Research trending side hustles and monetization methods for short-form content")
+    a = router._keyword_pick("Recommend a platform growth strategy and audience scaling plan for short-form video channels")
     assert a.name == "growth"
 
 
@@ -153,6 +145,55 @@ async def test_core_handles_help_without_keys(monkeypatch, tmp_path):
     out = await j.handle("/help")
     assert "/agents" in out
     out2 = await j.handle("/agents")
-    assert "dev" in out2 and "server" in out2
+    assert "dev" in out2 and "prompt" in out2
     out3 = await j.handle("/status")
     assert "Session" in out3
+
+@pytest.mark.asyncio
+async def test_core_profit_and_wake_phrase(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from jarvis.core.jarvis_core import JarvisCore
+
+    j = JarvisCore()
+    j.memory.set_fact("profit_q2", 1200)
+    j.memory.set_fact("revenue_tiktok", "$3,500")
+    j.memory.set_fact("last_daily_briefing", "This is today's manager briefing.")
+    j.task_monitor.sync_tasks({"social": "Post 3 videos today."})
+
+    profit_out = await j.handle("/profit")
+    assert "profit_q2" in profit_out
+    assert "revenue_tiktok" in profit_out
+    assert "Total recognized numeric profit/revenue" in profit_out
+
+    wake_out = await j.handle("hello jarvis tell me whats going on today")
+    assert "Daily briefing" in wake_out
+    assert "Current work plan for the team" in wake_out
+    assert "Profit summary" in wake_out
+
+@pytest.mark.asyncio
+async def test_core_tasks_and_general_ask(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from jarvis.core.jarvis_core import JarvisCore
+
+    j = JarvisCore()
+    out = await j.handle("/tasks")
+    assert "No active tasks" in out
+    out2 = await j.handle("/ask what is Jarvis?")
+    assert "Personal agent not available" not in out2
+
+@pytest.mark.asyncio
+async def test_core_health_and_escalation(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from jarvis.core.jarvis_core import JarvisCore
+
+    j = JarvisCore()
+    health_out = await j.handle("/health")
+    assert "All systems nominal" in health_out or "No issues detected" in health_out
+    escalate_out = await j.handle("/escalate")
+    assert "No critical issues to escalate." in escalate_out

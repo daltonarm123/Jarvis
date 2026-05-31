@@ -50,7 +50,8 @@ class SocialAgent(BaseAgent):
                 "social_accounts",
                 "Create and manage social accounts across platforms and handle posting workflows.",
                 ["tiktok", "instagram", "facebook", "youtube", "account", "create account",
-                 "multi-account", "post", "upload", "publish", "schedule", "reel", "shorts"],
+                 "multi-account", "manage account", "account management", "post", "upload", "publish",
+                 "schedule", "reel", "shorts", "upload video", "video upload", "credentials"],
             ),
             Capability(
                 "social_strategy",
@@ -61,8 +62,12 @@ class SocialAgent(BaseAgent):
 
     async def handle(self, ctx: TaskContext) -> str:
         text = ctx.user_input.strip().lower()
-        if "add credentials" in text or ("for" in text and any(p in text for p in self.platforms)):
+        if "add credentials" in text or "update credentials" in text or ("for" in text and any(p in text for p in self.platforms)):
             return await self._handle_credential_input(ctx)
+        if "remove account" in text or "delete account" in text:
+            return self._handle_account_removal(ctx)
+        if "manage account" in text or "account details" in text or "show account" in text:
+            return self._handle_account_management(ctx)
         if "create account" in text or "new account" in text:
             return await self._handle_account_creation(ctx)
         if "list accounts" in text or "accounts" in text:
@@ -248,6 +253,57 @@ class SocialAgent(BaseAgent):
             None,
         )
         return f"Social publish result: {result}"
+
+    def _handle_account_management(self, ctx: TaskContext) -> str:
+        text = ctx.user_input.strip().lower()
+        platform = self._normalize_platform(text)
+        if not platform:
+            return "Please specify which platform account you want to inspect or manage: TikTok, Instagram, Facebook, or YouTube."
+
+        account = self._find_account(ctx, platform)
+        if not account:
+            return (
+                f"No registered account found for {platform}. "
+                f"Use 'create account for {platform}' to add one, then store credentials."
+            )
+
+        creds_available = account.get("credentials") is not None
+        lines = [
+            f"Account details for {account.get('alias')} ({platform}):",
+            f"  • Status: {account.get('status', 'unknown')}",
+            f"  • Credentials stored: {'yes' if creds_available else 'no'}",
+            f"  • Last activity: {account.get('last_activity', 'not recorded')}",
+            f"  • Notes: {account.get('notes', 'none')}",
+        ]
+        return "\n".join(lines)
+
+    def _handle_account_removal(self, ctx: TaskContext) -> str:
+        text = ctx.user_input.strip().lower()
+        platform = self._normalize_platform(text)
+        if not platform:
+            return "Please specify the platform account to delete. Example: 'remove account for TikTok'."
+
+        alias_match = re.search(r"for\s+\w+\s+(\w+)", text)
+        alias = alias_match.group(1) if alias_match else None
+        state = self._load_state(ctx)
+        accounts = state.get("accounts", [])
+        remaining = []
+        removed = None
+        for account in accounts:
+            if account.get("platform") == platform and (alias is None or account.get("alias") == alias):
+                removed = account
+                continue
+            remaining.append(account)
+
+        if not removed:
+            return (f"No matching account found for {platform} with alias '{alias or 'any'}'.")
+
+        state["accounts"] = remaining
+        self._save_state(ctx, state)
+        vault = self._get_vault(ctx)
+        if alias:
+            vault.delete(platform, alias)
+        return f"Removed account '{removed.get('alias')}' for {platform}. Credentials were also cleared from the vault."
 
     def _extract_media_path(self, text: str) -> Optional[str]:
         match = re.search(r"(?:video|file|media)\s*(?:is|=|:)?\s*(https?://\S+|\S+\.(?:mp4|mov|m4v))", text, re.IGNORECASE)

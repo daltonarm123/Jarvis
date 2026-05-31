@@ -49,7 +49,7 @@ class ServerAgent(BaseAgent):
             Capability(
                 "server_admin",
                 "txAdmin automation, server performance, resource optimization.",
-                ["txadmin", "performance", "optimize", "server admin",
+                ["txadmin", "optimize", "server admin",
                  "lag", "tick rate", "convars"],
             ),
         ]

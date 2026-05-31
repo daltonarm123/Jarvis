@@ -13,12 +13,9 @@ class MonetizationAgent(BaseAgent):
     provider = "openai"
     model = "gpt-4o-mini"
     system_prompt = (
-        "You are Monetization Jarvis. Your role is to help Dalton build profitable creator
-"
-        "business models around faceless short-form videos. Suggest ad, affiliate, product,
-"
-        "and service-based revenue strategies. Prioritize fast-moving ideas, scalable
-"
+        "You are Monetization Jarvis. Your role is to help Dalton build profitable creator "
+        "business models around faceless short-form videos. Suggest ad, affiliate, product, "
+        "and service-based revenue strategies. Prioritize fast-moving ideas, scalable "
         "offerings, and low-friction execution paths with clear profit potential."
     )
 
@@ -31,8 +28,9 @@ class MonetizationAgent(BaseAgent):
             Capability(
                 "revenue",
                 "Recommend monetization tactics, affiliate funnels, ad strategies, and products.",
-                ["monetize", "revenue", "profit", "affiliate", "sponsorship", "ad", "offer",
-                 "digital product", "course", "service", "subscription"],
+                ["monetize", "revenue", "profit", "affiliate", "sponsorship", "sponsor",
+                 "sponsors", "ad", "offer", "product", "products", "digital product",
+                 "course", "service", "subscription"],
             ),
             Capability(
                 "business_model",

@@ -19,7 +19,19 @@ from jarvis.llm import LLMMessage, get_provider
 
 ROUTER_SYSTEM = """You are the Jarvis router. Given a user request and a list of specialist agents (each with capabilities), pick the SINGLE best agent to handle it. Reply with ONLY a JSON object:
 {"agent": "<agent_name>", "reason": "<one short sentence>"}
-Do not wrap in markdown. Do not add commentary."""
+Do not wrap in markdown. Do not add commentary.
+
+The agents have these roles:
+- content: create new short-form video ideas, hooks, captions, scripts, titles, and creative assets.
+- prompt: review and polish existing prompts, hooks, scripts, and creative wording for clarity and engagement.
+- research: discover trending topics, viral ideas, niches, and market signals.
+- growth: recommend platform growth strategy, audience scaling, distribution, and channel expansion.
+- analytics: analyze performance metrics and recommend optimizations from data.
+- monetization: design revenue streams, sponsorships, offers, and scalable business models.
+- operations: build workflows, SOPs, automation plans, and execution systems for publishing.
+- social: manage accounts, credentials, posting, uploads, and platform publishing workflows.
+- personal: handle schedule, reminders, quick assistant tasks, and general questions when no specialist fits.
+Choose the narrowest best fit and do not assign multiple agents to the same request."""
 
 
 class JarvisRouter:
