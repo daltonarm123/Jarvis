@@ -11,6 +11,8 @@ from .research_agent import ResearchAgent
 from .analytics_agent import AnalyticsAgent
 from .monetization_agent import MonetizationAgent
 from .operations_agent import OperationsAgent
+from .video_editor_agent import VideoEditorAgent
+from .email_agent import EmailAgent
 
 ALL_AGENTS = [
     DevAgent,
@@ -23,6 +25,8 @@ ALL_AGENTS = [
     AnalyticsAgent,
     MonetizationAgent,
     OperationsAgent,
+    VideoEditorAgent,
+    EmailAgent,
 ]
 
 __all__ = [
@@ -39,5 +43,6 @@ __all__ = [
     "AnalyticsAgent",
     "MonetizationAgent",
     "OperationsAgent",
+    "EmailAgent",
     "ALL_AGENTS",
 ]

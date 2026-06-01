@@ -18,6 +18,7 @@ from jarvis.agents import (
     AnalyticsAgent,
     MonetizationAgent,
     OperationsAgent,
+    EmailAgent,
     TaskContext,
 )
 from jarvis.core.router import JarvisRouter
@@ -134,6 +135,57 @@ async def test_social_agent_can_create_accounts_for_all_platforms(tmp_path, plat
     assert state["accounts"][0]["alias"] == alias
     assert state["accounts"][0]["status"] in {"pending", "active"}
     assert "credentials" not in state["accounts"][0] or state["accounts"][0]["has_credentials"] is False
+    memory.close()
+
+
+@pytest.mark.asyncio
+async def test_social_agent_creates_linked_signup_email(tmp_path):
+    memory = MemoryStore(str(tmp_path / "jarvis.db"))
+    agent = SocialAgent()
+    ctx = TaskContext(
+        session_id="s1",
+        user_input="create account for youtube as yt_test",
+        history=[],
+        memory=memory,
+    )
+
+    out = await agent.handle(ctx)
+    assert "signup email address" in out.lower() or "tracked signup email" in out.lower()
+    email_state = memory.get_agent_state("email")
+    assert len(email_state.get("emails", [])) == 1
+    assert email_state["emails"][0]["linked_account"] == "youtube:yt_test"
+
+    social_state = memory.get_agent_state("social")
+    assert social_state["accounts"][0]["email_address"] == email_state["emails"][0]["address"]
+    memory.close()
+
+
+@pytest.mark.asyncio
+async def test_email_agent_can_create_and_monitor_address(tmp_path):
+    memory = MemoryStore(str(tmp_path / "jarvis.db"))
+    agent = EmailAgent()
+    ctx = TaskContext(
+        session_id="s2",
+        user_input="create email for signup as signup_test",
+        history=[],
+        memory=memory,
+    )
+
+    out = await agent.handle(ctx)
+    assert "created tracked email address" in out.lower()
+    state = memory.get_agent_state("email")
+    assert len(state.get("emails", [])) == 1
+    address = state["emails"][0]["address"]
+    assert "signup_test" in address
+
+    monitor_ctx = TaskContext(
+        session_id="s2",
+        user_input=f"check inbox for {address}",
+        history=[],
+        memory=memory,
+    )
+    monitor_out = await agent.handle(monitor_ctx)
+    assert "no new messages" in monitor_out.lower()
     memory.close()
 
 

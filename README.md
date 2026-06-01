@@ -155,6 +155,11 @@ export JARVIS_MODE=autonomous
 python -m jarvis.main
 ```
 
+One-shot pipeline mode (test with simulated posting):
+```bash
+python -m jarvis.main --pipeline --platform=tiktok --topic="short-form marketing" --simulate
+```
+
 systemd:
 ```bash
 sudo ./deploy.sh system
@@ -170,6 +175,18 @@ For social automation, configure platform credentials in `.env`:
 - `INSTAGRAM_BUSINESS_ACCOUNT_ID`
 - `YOUTUBE_ACCESS_TOKEN`
 - `TIKTOK_ACCESS_TOKEN`
+
+For real email-based signup handling, configure an IMAP inbox and aliasing:
+
+- `EMAIL_BASE_ADDRESS` (e.g. `youremail@example.com`)
+- `EMAIL_IMAP_HOST` (e.g. `imap.gmail.com`)
+- `EMAIL_IMAP_PORT` (default `993`)
+- `EMAIL_IMAP_USER`
+- `EMAIL_IMAP_PASSWORD`
+- `EMAIL_IMAP_FOLDER` (default `INBOX`)
+- `JARVIS_EMAIL_DOMAIN` (optional alias domain for non-real testing)
+
+When email is configured, Jarvis will generate tracked signup aliases using your base address and monitor confirmations automatically. Use `@email monitor <address>` to inspect inbound messages.
 
 `Social` can publish to Facebook/Instagram and YouTube when tokens are available. TikTok support is scaffolded and can be extended with a supported Business API integration.
 

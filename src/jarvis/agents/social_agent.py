@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 from jarvis.agents.base_agent import BaseAgent, Capability, TaskContext
 from jarvis.agents.credentials import CredentialVault, REQUIRED_CREDENTIALS, CREDENTIAL_DESCRIPTIONS
+from jarvis.agents.email_agent import make_tracked_email_address
 from jarvis.platforms import get_connector, available_platforms
 
 
@@ -89,6 +93,40 @@ class SocialAgent(BaseAgent):
     def _save_state(self, ctx: TaskContext, state: Dict[str, Any]) -> None:
         ctx.memory.set_agent_state(self.name, state)
 
+    def _get_email_state(self, ctx: TaskContext) -> Dict[str, Any]:
+        return ctx.memory.get_agent_state("email") or {}
+
+    def _save_email_state(self, ctx: TaskContext, state: Dict[str, Any]) -> None:
+        ctx.memory.set_agent_state("email", state)
+
+    def _ensure_linked_email(self, ctx: TaskContext, platform: str, alias: str) -> str:
+        state = self._get_email_state(ctx)
+        emails = state.get("emails", [])
+        linked_key = f"{platform}:{alias}"
+
+        existing = next(
+            (email for email in emails if email.get("linked_account") == linked_key),
+            None,
+        )
+        if existing:
+            return existing["address"]
+
+        alias_key = f"{platform}_{alias}_{uuid.uuid4().hex[:6]}"
+        email_address = make_tracked_email_address(alias_key)
+        new_email = {
+            "address": email_address,
+            "alias": alias_key,
+            "purpose": f"{platform} signup",
+            "status": "active",
+            "created": time.time(),
+            "linked_account": linked_key,
+            "messages": [],
+        }
+        emails.append(new_email)
+        state["emails"] = emails
+        self._save_email_state(ctx, state)
+        return email_address
+
     def _suggest_account_alias(self, ctx: TaskContext, platform: str) -> str:
         state = self._load_state(ctx)
         existing = {a.get("alias") for a in state.get("accounts", [])}
@@ -164,18 +202,82 @@ class SocialAgent(BaseAgent):
         account_info = result.get("account_info", {})
         self._register_account(ctx, platform, alias, status=status)
 
+        email_address = self._ensure_linked_email(ctx, platform, alias)
+        if email_address:
+            account_info["email_address"] = email_address
+            account_info["email_status"] = "created"
+
         state = self._load_state(ctx)
         accounts = state.get("accounts", [])
         for account in accounts:
             if account.get("platform") == platform and account.get("alias") == alias:
                 account["connector_info"] = account_info
                 account["status"] = status
+                account["email_address"] = email_address
+                account["has_email"] = True
                 break
         state["accounts"] = accounts
         self._save_state(ctx, state)
 
+        # Auto-fill credentials from environment variables when available.
+        # This helps avoid manual credential input when tokens are provided via env.
+        try:
+            vault = self._get_vault(ctx)
+            env_creds = {}
+            if platform == "facebook":
+                token = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
+                page_id = os.getenv("FACEBOOK_PAGE_ID")
+                if token or page_id:
+                    if token:
+                        env_creds["access_token"] = token
+                    if page_id:
+                        env_creds["page_id"] = page_id
+            elif platform == "instagram":
+                token = os.getenv("INSTAGRAM_ACCESS_TOKEN")
+                insta_id = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID")
+                if token or insta_id:
+                    if token:
+                        env_creds["access_token"] = token
+                    if insta_id:
+                        env_creds["instagram_business_account_id"] = insta_id
+            elif platform == "youtube":
+                token = os.getenv("YOUTUBE_ACCESS_TOKEN")
+                if token:
+                    env_creds["access_token"] = token
+            elif platform == "tiktok":
+                token = os.getenv("TIKTOK_ACCESS_TOKEN") or os.getenv("TIKTOK_CLIENT_KEY")
+                if token:
+                    env_creds["access_token"] = token
+
+            if env_creds:
+                vault.store(platform, alias, env_creds)
+                # mark the registered account as having credentials
+                state = self._load_state(ctx)
+                accounts = state.get("accounts", [])
+                for account in accounts:
+                    if account.get("platform") == platform and account.get("alias") == alias:
+                        account["has_credentials"] = True
+                        account["last_activity"] = "credentials_auto_loaded"
+                        break
+                state["accounts"] = accounts
+                self._save_state(ctx, state)
+        except Exception:
+            # Non-fatal: if vault/store isn't available or fails, continue without interrupting flow
+            pass
+
         prompt = self._build_credential_prompt(platform, REQUIRED_CREDENTIALS.get(platform, []))
-        instructions = result.get("message", "Account registered successfully.")
+        if result.get("success"):
+            instructions = result.get("message", "Account created successfully.")
+        else:
+            instructions = (
+                f"Account registration complete for {platform} as '{alias}'. "
+                "I have tracked it internally and can use stored credentials for posting."
+            )
+        if email_address:
+            instructions += (
+                f"\nA tracked signup email address has been created: {email_address}. "
+                "Use '@email monitor {email_address}' to check for confirmation messages."
+            )
         if account_info:
             instructions += "\n" + account_info.get("notes", "")
         return (
@@ -352,6 +454,7 @@ class SocialAgent(BaseAgent):
             f"Account details for {account.get('alias')} ({platform}):",
             f"  • Status: {account.get('status', 'unknown')}",
             f"  • Credentials stored: {'yes' if creds_available else 'no'}",
+            f"  • Signup email: {account.get('email_address', 'none')}",
             f"  • Last activity: {account.get('last_activity', 'not recorded')}",
             f"  • Notes: {account.get('notes', 'none')}",
         ]

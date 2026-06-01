@@ -17,9 +17,12 @@ import os
 import re
 import time
 import uuid
+import json
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from jarvis.agents import ALL_AGENTS, BaseAgent, TaskContext
+from jarvis.agents.credentials import CredentialVault
 from jarvis.agents.manager_agent import ManagerAgent
 from jarvis.communication.voice_interface import VoiceInterface
 from jarvis.core.automation import ScheduleManager, TaskMonitor
@@ -107,6 +110,8 @@ class JarvisCore:
             return self._agents_text()
         if head == "status":
             return self._status_text()
+        if head in ("import_tokens", "import-tokens"):
+            return self._import_tokens(rest)
         if head in ("briefing", "daily", "standup"):
             return await self._generate_daily_briefing()
         if head == "plans":
@@ -138,6 +143,70 @@ class JarvisCore:
         if head == "session":
             return f"Session: {self.session_id}"
         return f"Unknown command: /{head}. Try /help."
+
+    def _import_tokens(self, rest: str) -> str:
+        """Import tokens from a local JSON file into the credential vault.
+
+        The file format is expected to be JSON with top-level keys for platforms
+        (e.g. "youtube", "facebook") and the provider token JSON as values.
+        Tokens are stored under the `social` agent vault using alias 'default' unless
+        an alias is provided via `rest` as a path or alias string.
+        """
+        path = rest.strip() or str(Path.home() / ".jarvis_tokens.json")
+        try:
+            data = json.loads(Path(path).read_text())
+        except Exception as e:
+            return f"Failed to read tokens from {path}: {e}"
+
+        # Load or create social agent state
+        state = self.memory.get_agent_state("social") or {}
+        vault = CredentialVault(state)
+
+        imported = []
+        for platform, token_blob in data.items():
+            if not isinstance(token_blob, dict):
+                continue
+            alias = "default"
+            creds = {}
+            # Map common fields into REQUIRED_CREDENTIALS style
+            if platform == "youtube":
+                if token_blob.get("access_token"):
+                    creds["access_token"] = token_blob.get("access_token")
+            if platform == "facebook":
+                if token_blob.get("access_token"):
+                    creds["access_token"] = token_blob.get("access_token")
+                if token_blob.get("page_id"):
+                    creds["page_id"] = token_blob.get("page_id")
+            if platform == "instagram":
+                if token_blob.get("access_token"):
+                    creds["access_token"] = token_blob.get("access_token")
+                if token_blob.get("instagram_business_account_id"):
+                    creds["instagram_business_account_id"] = token_blob.get("instagram_business_account_id")
+            if platform == "tiktok":
+                if token_blob.get("access_token"):
+                    creds["access_token"] = token_blob.get("access_token")
+
+            if creds:
+                vault.store(platform, alias, creds)
+                imported.append(platform)
+                # ensure an account entry exists for this platform/alias
+                accounts = state.get("accounts", [])
+                if not any(a.get("platform") == platform and a.get("alias") == alias for a in accounts):
+                    accounts.append({
+                        "platform": platform,
+                        "alias": alias,
+                        "status": "active",
+                        "notes": "Imported from tokens",
+                        "has_credentials": True,
+                    })
+                    state["accounts"] = accounts
+
+        # Persist modified social agent state
+        self.memory.set_agent_state("social", wallet_state := state)
+
+        if not imported:
+            return "No recognizable tokens were found in the file."
+        return f"Imported tokens for: {', '.join(imported)} (stored as alias 'default')."
 
     def _cmd_remember(self, rest: str) -> str:
         if "=" not in rest:
@@ -535,6 +604,13 @@ class JarvisCore:
         for item in due:
             account = self._find_social_account(item.platform, item.alias)
             if not account:
+                if os.getenv("JARVIS_SIMULATE_POSTING", "").lower() in ("1", "true", "yes"):
+                    results.append(
+                        f"{item.id}: simulated post because account {item.alias} was not found for {item.platform}. "
+                        "JARVIS_SIMULATE_POSTING is enabled."
+                    )
+                    self.schedule_manager.set_schedule_status(item.id, "completed")
+                    continue
                 results.append(
                     f"{item.id}: account {item.alias} not found for {item.platform}. "
                     f"Create it with '/account add platform={item.platform} alias={item.alias}'."
@@ -542,6 +618,13 @@ class JarvisCore:
                 self.schedule_manager.set_schedule_status(item.id, "failed")
                 continue
             if not account.get("has_credentials"):
+                if os.getenv("JARVIS_SIMULATE_POSTING", "").lower() in ("1", "true", "yes"):
+                    results.append(
+                        f"{item.id}: simulated post because credentials are missing for {item.alias}. "
+                        "JARVIS_SIMULATE_POSTING is enabled."
+                    )
+                    self.schedule_manager.set_schedule_status(item.id, "completed")
+                    continue
                 results.append(
                     f"{item.id}: credentials missing for account {item.alias}. "
                     f"Add them with '/account credentials platform={item.platform} alias={item.alias} <fields>'."
@@ -636,6 +719,113 @@ class JarvisCore:
                         pass
                 return account
         return None
+
+    async def _run_agent(self, agent_name: str, prompt: str) -> str:
+        agent = next((a for a in self.agents if a.name == agent_name), None)
+        if not agent:
+            return f"Agent '{agent_name}' is not available."
+        ctx = TaskContext(
+            session_id=self.session_id,
+            user_input=prompt,
+            history=self.memory.recent_messages(self.session_id, limit=20),
+            memory=self.memory,
+        )
+        try:
+            reply = await agent.handle(ctx)
+        except Exception as exc:
+            return f"[{agent_name}] error: {exc}"
+        self.memory.add_message(self.session_id, "assistant", reply, agent=agent.name)
+        return reply
+
+    async def run_pipeline(
+        self,
+        platform: str,
+        alias: Optional[str],
+        topic: str,
+        when: str = "now",
+        video_path: str = "",
+        tags: Optional[List[str]] = None,
+    ) -> str:
+        tags = tags or []
+        platform_name = self._normalize_platform(platform)
+        if not platform_name:
+            return f"Unknown platform '{platform}'. Choose TikTok, Instagram, Facebook, or YouTube."
+
+        alias = alias or self._suggest_social_alias(platform_name)
+        if not self._social_account_exists(platform_name, alias):
+            await self._delegate_to_social_agent(
+                f"create account for {platform_name} as {alias}"
+            )
+            self._ensure_social_account(platform_name, alias, status="pending")
+
+        research_prompt = (
+            f"Find 3 trending short-form video ideas and hooks for {topic} on {platform_name}. "
+            "Give each idea as a concise one-sentence hook plus a short action plan."
+        )
+        research_output = await self._run_agent("research", research_prompt)
+
+        content_prompt = (
+            f"Based on the research below, create a complete short-form video script, title, caption, and hashtag set. "
+            f"Keep it optimized for {platform_name} with a strong hook and a clear call to action.\n\nResearch:\n{research_output}"
+        )
+        content_output = await self._run_agent("content", content_prompt)
+
+        prompt_prompt = (
+            f"Review and improve the following video creative direction, hook, caption, and hashtags for virality: \n\n{content_output}"
+        )
+        prompt_output = await self._run_agent("prompt", prompt_prompt)
+
+        editor_prompt = (
+            f"Create a practical editing plan with transitions, pacing, and on-screen text for a faceless short-form video. "
+            f"Use the concept and messaging below.\n\n{prompt_output}"
+        )
+        edit_plan = await self._run_agent("video_editor", editor_prompt)
+
+        schedule_message = await self._schedule_command(
+            platform=platform_name,
+            alias=alias,
+            video_path=video_path or "https://example.com/video.mp4",
+            title=f"Auto-publish: {topic}",
+            caption=prompt_output,
+            when=when,
+            tags=tags,
+        )
+
+        publish_result = ""
+        if when.strip().lower() in ("now", "today"):
+            publish_result = await self._run_scheduled_posts(quiet=True)
+            publish_result = f"\n\nImmediate publish result:\n{publish_result}" if publish_result else ""
+
+        return (
+            f"Pipeline started for platform {platform_name} and alias {alias}.\n\n"
+            f"Research output:\n{research_output}\n\n"
+            f"Content output:\n{content_output}\n\n"
+            f"Prompt improvements:\n{prompt_output}\n\n"
+            f"Editing plan:\n{edit_plan}\n\n"
+            f"{schedule_message}{publish_result}"
+        )
+
+    async def _schedule_command(
+        self,
+        platform: str,
+        alias: str,
+        video_path: str,
+        title: str,
+        caption: str,
+        when: str,
+        tags: List[str],
+    ) -> str:
+        params = {
+            "platform": platform,
+            "alias": alias,
+            "video_path": video_path,
+            "title": title,
+            "caption": caption,
+            "when": when,
+            "tags": ",".join(tags),
+        }
+        args = " ".join(f"{k}='{v}'" if " " in v else f"{k}={v}" for k, v in params.items() if v)
+        return await self._schedule_text(f"add {args}")
 
     def _normalize_platform(self, text: str) -> Optional[str]:
         platform = text.strip().lower()
