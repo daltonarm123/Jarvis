@@ -17,7 +17,7 @@ import os
 import re
 import time
 import uuid
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from jarvis.agents import ALL_AGENTS, BaseAgent, TaskContext
 from jarvis.agents.manager_agent import ManagerAgent
@@ -427,23 +427,51 @@ class JarvisCore:
 
         if command in ("add", "create"):
             params = self._parse_key_value_args(args)
-            missing = [k for k in ("platform", "alias", "video_path", "title", "caption", "when") if k not in params]
+            missing = [k for k in ("platform", "video_path", "title", "caption", "when") if k not in params]
             if missing:
                 return (
                     "Missing schedule fields: " + ", ".join(missing) + ". "
                     "Use '/schedule add platform=<platform> alias=<alias> video_path=<path> title='<title>' caption='<caption>' when=<when> tags=<tag1,tag2>'."
                 )
+            platform = params["platform"]
+            alias = params.get("alias")
+            account_auto_created = False
+            if not alias:
+                aliases = self._list_social_aliases(platform)
+                if len(aliases) == 1:
+                    alias = aliases[0]
+                elif len(aliases) == 0:
+                    alias = self._suggest_social_alias(platform)
+                    self._ensure_social_account(platform, alias, status="pending")
+                    account_auto_created = True
+                else:
+                    return (
+                        "Multiple accounts exist for this platform. Please specify alias=... in your schedule command."
+                    )
+            elif not self._social_account_exists(platform, alias):
+                self._ensure_social_account(platform, alias, status="pending")
+                account_auto_created = True
+
             tags = [t.strip() for t in params.get("tags", "").replace("#", "").split(",") if t.strip()]
             item = self.schedule_manager.add_schedule(
-                platform=params["platform"],
-                alias=params["alias"],
+                platform=platform,
+                alias=alias,
                 video_path=params["video_path"],
                 title=params["title"],
                 caption=params["caption"],
                 tags=tags,
                 when=params["when"],
             )
-            return f"Scheduled post {item.id} for {item.platform}/{item.alias} at {time.strftime('%Y-%m-%d %H:%M', time.localtime(item.scheduled_at))}."
+            response = (
+                f"Scheduled post {item.id} for {item.platform}/{item.alias} at "
+                f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(item.scheduled_at))}."
+            )
+            if account_auto_created:
+                response += (
+                    f" Account '{alias}' was auto-registered with pending status. "
+                    f"Add credentials with '/account credentials platform={platform} alias={alias} <fields>'."
+                )
+            return response
 
         if command in ("run", "execute", "due"):
             return await self._run_scheduled_posts()
@@ -496,23 +524,71 @@ class JarvisCore:
                 self.schedule_manager.set_schedule_status(item.id, "failed")
                 continue
             connector = get_connector(item.platform)
-            result = await asyncio.to_thread(
-                connector.post_video,
-                item.platform,
-                account,
-                item.video_path,
-                item.title,
-                item.caption,
-                item.tags,
-            )
+            try:
+                result = await asyncio.to_thread(
+                    connector.post_video,
+                    item.platform,
+                    account,
+                    item.video_path,
+                    item.title,
+                    item.caption,
+                    item.tags,
+                )
+            except Exception as exc:
+                result = {"success": False, "message": f"Connector error: {exc}"}
+
+            if not result.get("success") and os.getenv("JARVIS_SIMULATE_POSTING", "").lower() in ("1", "true", "yes"):
+                result = {
+                    "success": True,
+                    "message": "Simulated post execution because JARVIS_SIMULATE_POSTING is enabled.",
+                }
             status = "completed" if result.get("success") else "failed"
             self.schedule_manager.set_schedule_status(item.id, status)
             results.append(f"{item.id}: {result.get('message', 'Done')} [{status}]")
         return "\n".join(results)
 
+    def _get_social_state(self) -> Dict[str, Any]:
+        return self.memory.get_agent_state("social") or {}
+
+    def _save_social_state(self, state: Dict[str, Any]) -> None:
+        self.memory.set_agent_state("social", state)
+
+    def _list_social_aliases(self, platform: str) -> List[str]:
+        state = self._get_social_state()
+        return [a.get("alias") for a in state.get("accounts", []) if a.get("platform") == platform]
+
+    def _social_account_exists(self, platform: str, alias: str) -> bool:
+        return alias in self._list_social_aliases(platform)
+
+    def _suggest_social_alias(self, platform: str) -> str:
+        existing = set(self._list_social_aliases(platform))
+        base = f"{platform}_account"
+        alias = base
+        counter = 1
+        while alias in existing:
+            counter += 1
+            alias = f"{base}{counter}"
+        return alias
+
+    def _ensure_social_account(self, platform: str, alias: str, status: str = "pending") -> None:
+        state = self._get_social_state()
+        accounts = state.get("accounts", [])
+        if not any(a.get("platform") == platform and a.get("alias") == alias for a in accounts):
+            accounts.append(
+                {
+                    "platform": platform,
+                    "alias": alias,
+                    "status": status,
+                    "notes": "created by schedule automation",
+                    "has_credentials": False,
+                }
+            )
+            state["accounts"] = accounts
+            self._save_social_state(state)
+
     def _find_social_account(self, platform: str, alias: str) -> Optional[Dict[str, Any]]:
-        state = self.memory.get_agent_state("social")
-        accounts = state.get("accounts", []) if state else []
+        state = self._get_social_state()
+        accounts = state.get("accounts", [])
         for account in accounts:
             if account.get("platform") == platform and account.get("alias") == alias:
                 social = next((a for a in self.agents if a.name == "social"), None)
@@ -528,6 +604,9 @@ class JarvisCore:
                         creds = vault.get(platform, alias)
                         if creds:
                             account["credentials"] = creds
+                            if not account.get("has_credentials"):
+                                account["has_credentials"] = True
+                                self._save_social_state(state)
                     except Exception:
                         pass
                 return account

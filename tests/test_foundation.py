@@ -242,6 +242,43 @@ async def test_core_account_add_and_credentials(monkeypatch, tmp_path):
     assert state["accounts"][0]["has_credentials"] is True
 
 @pytest.mark.asyncio
+async def test_core_schedule_add_auto_creates_account(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from jarvis.core.jarvis_core import JarvisCore
+
+    j = JarvisCore()
+    out = await j.handle(
+        "/schedule add platform=instagram video_path=/tmp/video.mp4 title='Launch Test' caption='Hello launch' when=tomorrow"
+    )
+    assert "auto-registered" in out
+    assert "instagram_account" in out
+
+    accounts = await j.handle("/accounts")
+    assert "instagram_account (instagram)" in accounts
+
+@pytest.mark.asyncio
+async def test_core_publish_uses_simulation_when_enabled(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("JARVIS_SIMULATE_POSTING", "true")
+    from jarvis.core.jarvis_core import JarvisCore
+
+    j = JarvisCore()
+    await j.handle("/account add platform=instagram alias=insta_test")
+    await j.handle(
+        "/account credentials platform=instagram alias=insta_test access_token=ABC123 instagram_business_account_id=98765"
+    )
+    await j.handle(
+        "/schedule add platform=instagram alias=insta_test video_path=/tmp/video.mp4 title='Launch Test' caption='Hello launch' when=now"
+    )
+    publish = await j.handle("/publish now")
+    assert "Simulated post execution" in publish
+    assert "completed" in publish
+
+@pytest.mark.asyncio
 async def test_core_profit_and_wake_phrase(monkeypatch, tmp_path):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
