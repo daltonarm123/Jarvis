@@ -41,6 +41,7 @@ class JarvisCore:
         self.schedule_manager = ScheduleManager(self.memory)
         self.autonomous_mode = os.getenv("JARVIS_MODE", "interactive") == "autonomous"
         self.autonomous_interval = int(os.getenv("JARVIS_AUTONOMOUS_INTERVAL", str(24 * 60 * 60)))
+        self.publish_interval = int(os.getenv("JARVIS_PUBLISH_INTERVAL", str(5 * 60)))
 
     # ---------- main entry point ----------
 
@@ -187,7 +188,8 @@ class JarvisCore:
             f"Providers configured: {configured or 'NONE'}\n"
             f"Providers available:  {all_p}\n"
             f"Agents loaded: {len(self.agents)}\n"
-            f"Autonomous interval: {self.autonomous_interval}s"
+            f"Autonomous interval: {self.autonomous_interval}s\n"
+            f"Publish interval: {self.publish_interval}s"
         )
 
     @staticmethod
@@ -208,7 +210,14 @@ class JarvisCore:
             ui = UserInterface()
 
         if self.autonomous_mode:
-            await self._run_autonomous(ui)
+            publish_task = asyncio.create_task(self._run_autonomous_publish(ui))
+            briefing_task = asyncio.create_task(self._run_autonomous(ui))
+            try:
+                await asyncio.gather(briefing_task, publish_task)
+            finally:
+                publish_task.cancel()
+                briefing_task.cancel()
+                await asyncio.gather(publish_task, briefing_task, return_exceptions=True)
             return
 
         print("Jarvis online. Type /help for commands. Ctrl-C or 'quit' to exit.\n")
@@ -242,7 +251,23 @@ class JarvisCore:
             pass
         finally:
             print("Shutting down autonomous Jarvis.")
-            self.memory.close()
+
+    async def _run_autonomous_publish(self, ui=None) -> None:
+        print(f"Jarvis scheduled publishing loop starting every {self.publish_interval} seconds.")
+        try:
+            while True:
+                result = await self._run_scheduled_posts(quiet=True)
+                if result:
+                    message = f"Scheduled publish check:\n{result}"
+                    if ui:
+                        await ui.send_output(message)
+                    else:
+                        print(message)
+                await asyncio.sleep(self.publish_interval)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            print("Shutting down scheduled publishing loop.")
 
     async def _generate_daily_briefing(self) -> str:
         facts = self.memory.all_facts()
@@ -497,10 +522,10 @@ class JarvisCore:
             return await self._run_scheduled_posts()
         return "Use '/publish now' to execute due scheduled posts or '/publish status' to inspect the queue."
 
-    async def _run_scheduled_posts(self) -> str:
+    async def _run_scheduled_posts(self, quiet: bool = False) -> str:
         due = self.schedule_manager.get_due_schedules()
         if not due:
-            return "No scheduled posts are due right now."
+            return "" if quiet else "No scheduled posts are due right now."
 
         results = []
         social = next((a for a in self.agents if a.name == "social"), None)

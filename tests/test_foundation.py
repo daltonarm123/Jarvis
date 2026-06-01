@@ -279,6 +279,17 @@ async def test_core_publish_uses_simulation_when_enabled(monkeypatch, tmp_path):
     assert "completed" in publish
 
 @pytest.mark.asyncio
+async def test_core_quiet_publish_check_returns_empty_when_none_due(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from jarvis.core.jarvis_core import JarvisCore
+
+    j = JarvisCore()
+    out = await j._run_scheduled_posts(quiet=True)
+    assert out == ""
+
+@pytest.mark.asyncio
 async def test_core_profit_and_wake_phrase(monkeypatch, tmp_path):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
