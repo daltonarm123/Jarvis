@@ -112,6 +112,8 @@ class JarvisCore:
             return self._status_text()
         if head in ("import_tokens", "import-tokens"):
             return self._import_tokens(rest)
+        if head in ("apply_patch", "apply-patch"):
+            return self._apply_patch(rest)
         if head in ("briefing", "daily", "standup"):
             return await self._generate_daily_briefing()
         if head == "plans":
@@ -143,6 +145,68 @@ class JarvisCore:
         if head == "session":
             return f"Session: {self.session_id}"
         return f"Unknown command: /{head}. Try /help."
+
+    def _apply_patch(self, rest: str) -> str:
+        """Apply patches from a local JSON file.
+
+        Usage: /apply_patch /path/to/patches.json
+        The JSON should match the format produced by DevAgent suggestions:
+        {"patches": [{"path": "relative/path/to/file.py", "content": "...", "simple": true}, ...]}
+        Simple patches (simple=true) will be applied. Non-simple patches require
+        ALLOW_DEV_APPLY=true in the environment to be written.
+        """
+        path = rest.strip()
+        if not path:
+            return "Usage: /apply_patch </absolute/or/repo/relative/path/to/patches.json>"
+
+        try:
+            data = json.loads(Path(path).read_text())
+        except Exception as e:
+            return f"Failed to read patch file {path}: {e}"
+
+        patches = data.get("patches") if isinstance(data, dict) else None
+        if not patches:
+            return "No patches found in the JSON file."
+
+        repo_root = Path(__file__).resolve().parents[3]
+        applied = []
+        skipped = []
+        allow_non_simple = os.getenv("ALLOW_DEV_APPLY", "false").lower() == "true"
+
+        for p in patches:
+            ppath = p.get("path")
+            pcontent = p.get("content")
+            simple = bool(p.get("simple"))
+            if not ppath or pcontent is None:
+                skipped.append(ppath or "(missing path)")
+                continue
+            tgt = (repo_root / ppath).resolve()
+            try:
+                tgt.relative_to(repo_root)
+            except Exception:
+                skipped.append(ppath)
+                continue
+
+            if simple or allow_non_simple:
+                try:
+                    tgt.parent.mkdir(parents=True, exist_ok=True)
+                    tgt.write_text(pcontent)
+                    applied.append(ppath)
+                except Exception as e:
+                    skipped.append(f"{ppath} (error: {e})")
+            else:
+                skipped.append(ppath)
+
+        out = []
+        out.append(f"Applied: {len(applied)}")
+        if applied:
+            out.append("\n".join(f" - {p}" for p in applied))
+        if skipped:
+            out.append(f"Skipped: {len(skipped)}")
+            out.append("\n".join(f" - {p}" for p in skipped))
+            out.append("To allow applying non-simple patches set ALLOW_DEV_APPLY=true in the environment.")
+
+        return "\n".join(out)
 
     def _import_tokens(self, rest: str) -> str:
         """Import tokens from a local JSON file into the credential vault.
